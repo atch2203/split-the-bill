@@ -109,7 +109,8 @@
 				const tempData = tempCtx.getImageData(0, 0, img.width, img.height);
 
 				// Find content bounds to crop out empty margins
-				const bounds = findContentBounds(tempData.data, img.width, img.height, 200);
+				// Use higher threshold (220) to detect lighter/thinner text
+				const bounds = findContentBounds(tempData.data, img.width, img.height, 220);
 				const cropWidth = bounds.right - bounds.left;
 				const cropHeight = bounds.bottom - bounds.top;
 				console.log('[OCR] Cropped size:', cropWidth, 'x', cropHeight);
@@ -188,9 +189,13 @@
 					}
 				}
 
-				console.log('[OCR] Otsu threshold:', threshold);
+				// Step 3: Adjust threshold to be more tolerant of thin/light text
+				// Boost threshold by 20% toward white to capture lighter gray as black
+				const toleranceBoost = 0.20;
+				const boostedThreshold = Math.min(255, threshold + (255 - threshold) * toleranceBoost);
+				console.log('[OCR] Otsu threshold:', threshold, '-> boosted:', Math.round(boostedThreshold));
 
-				// Step 3: Apply contrast stretch before thresholding
+				// Step 4: Apply contrast stretch before thresholding
 				let minGray = 255, maxGray = 0;
 				for (const g of grayValues) {
 					if (g < minGray) minGray = g;
@@ -199,15 +204,15 @@
 				const range = maxGray - minGray || 1;
 				console.log('[OCR] Gray range:', minGray, '-', maxGray);
 
-				// Step 4: Apply adaptive threshold with contrast stretching
+				// Step 5: Apply adaptive threshold with contrast stretching
 				let idx = 0;
 				for (let i = 0; i < data.length; i += 4) {
 					// Stretch contrast
 					const stretched = ((grayValues[idx] - minGray) / range) * 255;
-					// Adjust threshold relative to stretched values
-					const adjustedThreshold = ((threshold - minGray) / range) * 255;
+					// Use boosted threshold for more tolerance on thin text
+					const finalThreshold = ((boostedThreshold - minGray) / range) * 255;
 					// Apply threshold - make text black (0) on white (255) background
-					const bw = stretched > adjustedThreshold ? 255 : 0;
+					const bw = stretched > finalThreshold ? 255 : 0;
 					data[i] = bw;
 					data[i + 1] = bw;
 					data[i + 2] = bw;
