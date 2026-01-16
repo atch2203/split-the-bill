@@ -65,9 +65,31 @@ function generateRoomId(): string {
 	return Math.random().toString(36).substring(2, 8);
 }
 
-function createPeer(id?: string): Promise<Peer> {
+// Fetch TURN server credentials
+async function getIceServers(): Promise<RTCIceServer[]> {
+	try {
+		const response = await fetch('https://lucky-poetry-9bdc.atch22037433.workers.dev/');
+		if (!response.ok) {
+			throw new Error('Failed to fetch ICE servers');
+		}
+		const data = await response.json();
+		return data.iceServers || [];
+	} catch (err) {
+		console.warn('Failed to fetch TURN credentials, using default STUN:', err);
+		// Fallback to public STUN server
+		return [{ urls: 'stun:stun.l.google.com:19302' }];
+	}
+}
+
+async function createPeer(id?: string): Promise<Peer> {
+	const iceServers = await getIceServers();
+
 	return new Promise((resolve, reject) => {
-		const newPeer = new Peer(id || generateRoomId());
+		const newPeer = new Peer(id || generateRoomId(), {
+			config: {
+				iceServers
+			}
+		});
 
 		newPeer.on('open', (id) => {
 			peer = newPeer;
