@@ -14,12 +14,25 @@
 	let editName = $state('');
 	let editPrice = $state('');
 	let editQuantity = $state('');
+	let editTotal = $state(0); // Store the total to preserve when quantity changes
 
 	function startEditing() {
 		editName = item.name;
 		editPrice = item.price.toString();
 		editQuantity = item.quantity.toString();
+		editTotal = item.price * item.quantity;
 		isEditing = true;
+	}
+
+	// When quantity changes, adjust price to keep total the same
+	function handleQuantityChange(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const newQuantity = parseInt(input.value) || 1;
+		if (newQuantity > 0 && editTotal > 0) {
+			const newPrice = editTotal / newQuantity;
+			editPrice = newPrice.toFixed(2);
+		}
+		editQuantity = input.value;
 	}
 
 	function saveEditing() {
@@ -64,12 +77,14 @@
 					onkeydown={handleKeydown}
 				/>
 				<input
-					bind:value={editQuantity}
+					value={editQuantity}
+					oninput={handleQuantityChange}
 					type="number"
 					min="1"
 					placeholder="Qty"
 					class="w-16 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
 					onkeydown={handleKeydown}
+					title="Changing quantity adjusts price to keep total the same"
 				/>
 				<input
 					bind:value={editPrice}

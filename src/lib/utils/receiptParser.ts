@@ -223,24 +223,30 @@ function parseLine(line: string): ParsedLine | null {
 	const trimmed = line.trim();
 	if (!trimmed || shouldSkipLine(trimmed)) return null;
 
-	// Pattern 1: "2x Item Name $12.99" or "2 x Item Name 1299"
-	const qtyFirstMatch = trimmed.match(/^(\d+)\s*[x@]\s*(.+?)\s+[$]?([\d,.\s]+)\s*$/i);
+	// Pattern 1: "2x Item Name $12.99" or "2 Item Name 1299" (qty at start, x/@ optional)
+	// Price is divided by quantity to get per-unit price
+	const qtyFirstMatch = trimmed.match(/^(\d{1,2})\s*[x@]?\s+(.+?)\s+[$]?([\d,.\s]+)\s*$/i);
 	if (qtyFirstMatch) {
 		const quantity = parseInt(qtyFirstMatch[1], 10);
 		const name = qtyFirstMatch[2].trim();
-		const price = normalizePrice(qtyFirstMatch[3]);
-		if (name && price !== null && price > 0 && price < 1000) {
+		const totalPrice = normalizePrice(qtyFirstMatch[3]);
+		if (name && totalPrice !== null && totalPrice > 0 && totalPrice < 1000 && quantity > 0 && !shouldSkipLine(name)) {
+			// Divide by quantity to get per-unit price
+			const price = Math.round((totalPrice / quantity) * 100) / 100;
 			return { name, price, quantity };
 		}
 	}
 
 	// Pattern 2: "Item Name 2 @ $5.99" or "Item Name x2 599" (requires x or @)
+	// Price is divided by quantity to get per-unit price
 	const qtyAfterMatch = trimmed.match(/^(.+?)\s+(?:x\s*(\d+)|(\d+)\s*[@x])\s*[$]?([\d,.\s]+)\s*$/i);
 	if (qtyAfterMatch) {
 		const name = qtyAfterMatch[1].trim();
 		const quantity = parseInt(qtyAfterMatch[2] || qtyAfterMatch[3], 10);
-		const price = normalizePrice(qtyAfterMatch[4]);
-		if (name && price !== null && price > 0 && price < 1000 && quantity > 0 && !shouldSkipLine(name)) {
+		const totalPrice = normalizePrice(qtyAfterMatch[4]);
+		if (name && totalPrice !== null && totalPrice > 0 && totalPrice < 1000 && quantity > 0 && !shouldSkipLine(name)) {
+			// Divide by quantity to get per-unit price
+			const price = Math.round((totalPrice / quantity) * 100) / 100;
 			return { name, price, quantity };
 		}
 	}
