@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { billStore } from '$lib/stores/billStore.svelte';
+	import { syncedBillStore } from '$lib/stores/syncedBillStore.svelte';
 	import ItemRow from './ItemRow.svelte';
 	import { formatPrice } from '$lib/utils/receiptParser';
 </script>
@@ -8,7 +8,7 @@
 	<div class="mb-3 flex items-center justify-between">
 		<h2 class="text-lg font-semibold text-gray-800">Items</h2>
 		<button
-			onclick={() => billStore.addItem()}
+			onclick={() => syncedBillStore.addItem()}
 			class="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-600"
 		>
 			+ Add Item
@@ -16,21 +16,21 @@
 	</div>
 
 	<div class="space-y-2">
-		{#if billStore.items.length > 0}
-			{#each billStore.items as item (item.id)}
+		{#if syncedBillStore.items.length > 0}
+			{#each syncedBillStore.items as item (item.id)}
 				<ItemRow {item} />
 			{/each}
 
 			<!-- Subtotal -->
 			<div class="mt-4 flex justify-between border-t border-gray-200 pt-3">
 				<span class="font-medium text-gray-600">Subtotal</span>
-				<span class="font-semibold text-gray-800">{formatPrice(billStore.subtotal)}</span>
+				<span class="font-semibold text-gray-800">{formatPrice(syncedBillStore.subtotal)}</span>
 			</div>
 
 			<!-- Unassigned Warning -->
-			{#if billStore.unassignedItems.length > 0}
+			{#if syncedBillStore.unassignedItems.length > 0}
 				<div class="mt-2 rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">
-					<strong>{billStore.unassignedItems.length}</strong> item{billStore.unassignedItems
+					<strong>{syncedBillStore.unassignedItems.length}</strong> item{syncedBillStore.unassignedItems
 						.length === 1
 						? ' is'
 						: 's are'} not assigned to anyone

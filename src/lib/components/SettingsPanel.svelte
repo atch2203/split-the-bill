@@ -1,62 +1,72 @@
 <script lang="ts">
-	import { billStore } from '$lib/stores/billStore.svelte';
+	import { syncedBillStore } from '$lib/stores/syncedBillStore.svelte';
 	import { parsePrice, formatPrice } from '$lib/utils/receiptParser';
 
-	let taxInput = $state(billStore.settings.taxAmount.toString());
-	let tipPercentInput = $state(billStore.settings.tipPercent.toString());
+	let taxInput = $state(syncedBillStore.settings.taxAmount > 0 ? syncedBillStore.settings.taxAmount.toFixed(2) : '');
+	let tipPercentInput = $state(syncedBillStore.settings.tipPercent.toString());
 	let tipAmountInput = $state('');
-	let cashBackPercentInput = $state(billStore.settings.cashBackPercent.toString());
+	let cashBackPercentInput = $state(syncedBillStore.settings.cashBackPercent.toString());
 
 	let tipMode = $state<'percent' | 'dollar'>('percent');
 
-	// Sync tax input when store is updated externally (e.g., from receipt scanner)
+	// Track previous store values to detect external changes
+	let prevTaxAmount = syncedBillStore.settings.taxAmount;
+	let prevTipAmount = syncedBillStore.settings.tipAmount;
+
+	// Sync tax input when store is updated externally (e.g., from receipt scanner or peer sync)
 	$effect(() => {
-		const storeValue = billStore.settings.taxAmount;
-		const inputValue = parsePrice(taxInput);
-		if (storeValue !== inputValue) {
+		const storeValue = syncedBillStore.settings.taxAmount;
+		if (storeValue !== prevTaxAmount) {
+			prevTaxAmount = storeValue;
 			taxInput = storeValue > 0 ? storeValue.toFixed(2) : '';
 		}
 	});
 
-	// Sync tip amount input when store is updated externally (e.g., from receipt scanner)
+	// Sync tip amount input when store is updated externally (e.g., from receipt scanner or peer sync)
 	$effect(() => {
-		const storeValue = billStore.settings.tipAmount;
-		const inputValue = parsePrice(tipAmountInput);
-		if (storeValue > 0 && storeValue !== inputValue) {
-			tipAmountInput = storeValue.toFixed(2);
-			tipMode = 'dollar';
+		const storeValue = syncedBillStore.settings.tipAmount;
+		if (storeValue !== prevTipAmount) {
+			prevTipAmount = storeValue;
+			if (storeValue > 0) {
+				tipAmountInput = storeValue.toFixed(2);
+				tipMode = 'dollar';
+			}
 		}
 	});
 
 	function updateTax() {
-		billStore.updateSettings({ taxAmount: parsePrice(taxInput) });
+		const amount = parsePrice(taxInput);
+		prevTaxAmount = amount;
+		syncedBillStore.updateSettings({ taxAmount: amount });
 	}
 
 	function updateTipPercent() {
 		const percent = Math.max(0, Math.min(100, parseFloat(tipPercentInput) || 0));
-		billStore.updateSettings({ tipPercent: percent, tipAmount: 0 });
+		prevTipAmount = 0;
+		syncedBillStore.updateSettings({ tipPercent: percent, tipAmount: 0 });
 	}
 
 	function updateTipAmount() {
 		const amount = parsePrice(tipAmountInput);
-		billStore.updateSettings({ tipAmount: amount });
+		prevTipAmount = amount;
+		syncedBillStore.updateSettings({ tipAmount: amount });
 	}
 
 	function updateCashBackPercent() {
 		const percent = Math.max(0, Math.min(100, parseFloat(cashBackPercentInput) || 0));
-		billStore.updateSettings({ cashBackPercent: percent });
+		syncedBillStore.updateSettings({ cashBackPercent: percent });
 	}
 
 	function toggleTipMode() {
 		if (tipMode === 'percent') {
 			tipMode = 'dollar';
 			// Set dollar amount based on current effective tip
-			tipAmountInput = billStore.effectiveTipAmount.toFixed(2);
+			tipAmountInput = syncedBillStore.effectiveTipAmount.toFixed(2);
 			updateTipAmount();
 		} else {
 			tipMode = 'percent';
 			// Clear the fixed tip amount, revert to percentage
-			billStore.updateSettings({ tipAmount: 0 });
+			syncedBillStore.updateSettings({ tipAmount: 0 });
 		}
 	}
 
@@ -120,7 +130,7 @@
 								tipPercentInput = percent.toString();
 								updateTipPercent();
 							}}
-							class="flex-1 rounded-lg border py-1.5 text-sm transition-colors {billStore.settings.tipPercent === percent && billStore.settings.tipAmount === 0
+							class="flex-1 rounded-lg border py-1.5 text-sm transition-colors {syncedBillStore.settings.tipPercent === percent && syncedBillStore.settings.tipAmount === 0
 								? 'border-blue-500 bg-blue-50 text-blue-700'
 								: 'border-gray-300 text-gray-600 hover:bg-gray-50'}"
 						>
@@ -159,7 +169,7 @@
 			{/if}
 
 			<p class="mt-1 text-xs text-gray-500">
-				Tip: {formatPrice(billStore.effectiveTipAmount)}
+				Tip: {formatPrice(syncedBillStore.effectiveTipAmount)}
 			</p>
 		</div>
 
@@ -178,9 +188,9 @@
 				/>
 				<span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">%</span>
 			</div>
-			{#if billStore.effectiveCashBack > 0}
+			{#if syncedBillStore.effectiveCashBack > 0}
 				<p class="mt-1 text-xs text-gray-500">
-					Cash back: {formatPrice(billStore.effectiveCashBack)}
+					Cash back: {formatPrice(syncedBillStore.effectiveCashBack)}
 				</p>
 			{/if}
 		</div>

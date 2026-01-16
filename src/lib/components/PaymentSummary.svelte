@@ -1,25 +1,25 @@
 <script lang="ts">
-	import { billStore } from '$lib/stores/billStore.svelte';
+	import { syncedBillStore } from '$lib/stores/syncedBillStore.svelte';
 	import { formatPrice } from '$lib/utils/receiptParser';
 
 	function getPersonColor(personId: string): string {
-		const person = billStore.people.find((p) => p.id === personId);
+		const person = syncedBillStore.people.find((p) => p.id === personId);
 		return person?.color || '#gray';
 	}
 
 	const sumOfShares = $derived(
-		billStore.personTotals.reduce((sum, t) => sum + t.grandTotal, 0)
+		syncedBillStore.personTotals.reduce((sum, t) => sum + t.grandTotal, 0)
 	);
-	const roundingDifference = $derived(Math.abs(billStore.grandTotal - sumOfShares));
+	const roundingDifference = $derived(Math.abs(syncedBillStore.grandTotal - sumOfShares));
 </script>
 
 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
 	<h2 class="mb-3 text-lg font-semibold text-gray-800">Summary</h2>
 
-	{#if billStore.people.length > 0 && billStore.items.length > 0}
+	{#if syncedBillStore.people.length > 0 && syncedBillStore.items.length > 0}
 		<!-- Per-person breakdown -->
 		<div class="space-y-3">
-			{#each billStore.personTotals as total (total.personId)}
+			{#each syncedBillStore.personTotals as total (total.personId)}
 				<div
 					class="rounded-lg border-2 p-3"
 					style="border-color: {getPersonColor(total.personId)};"
@@ -68,7 +68,7 @@
 		<div class="mt-4 border-t border-gray-200 pt-3">
 			<div class="flex justify-between text-lg font-semibold">
 				<span class="text-gray-700">Total</span>
-				<span class="text-gray-900">{formatPrice(billStore.grandTotal)}</span>
+				<span class="text-gray-900">{formatPrice(syncedBillStore.grandTotal)}</span>
 			</div>
 
 			<!-- Verification -->
@@ -78,7 +78,7 @@
 				</p>
 			{/if}
 		</div>
-	{:else if billStore.people.length === 0}
+	{:else if syncedBillStore.people.length === 0}
 		<div class="py-8 text-center text-gray-500">
 			<p>Add people to see the payment breakdown</p>
 		</div>

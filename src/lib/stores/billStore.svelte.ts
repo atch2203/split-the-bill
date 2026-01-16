@@ -6,6 +6,9 @@ function generateId(): string {
 	return Math.random().toString(36).substring(2, 9);
 }
 
+// Callback for notifying peer store of state changes
+let onStateChange: (() => void) | null = null;
+
 // Reactive state using Svelte 5 runes
 let items = $state<ReceiptItem[]>([]);
 let people = $state<Person[]>([]);
@@ -66,6 +69,12 @@ const personTotals = $derived.by(() => {
 });
 
 // Actions
+function notifyStateChange(): void {
+	if (onStateChange) {
+		onStateChange();
+	}
+}
+
 function addItem(name: string = 'New Item', price: number = 0, quantity: number = 1): ReceiptItem {
 	const newItem: ReceiptItem = {
 		id: generateId(),
@@ -75,6 +84,7 @@ function addItem(name: string = 'New Item', price: number = 0, quantity: number 
 		assignedTo: []
 	};
 	items.push(newItem);
+	notifyStateChange();
 	return newItem;
 }
 
@@ -82,6 +92,7 @@ function removeItem(id: string): void {
 	const index = items.findIndex((item) => item.id === id);
 	if (index !== -1) {
 		items.splice(index, 1);
+		notifyStateChange();
 	}
 }
 
@@ -89,12 +100,14 @@ function updateItem(id: string, updates: Partial<Omit<ReceiptItem, 'id'>>): void
 	const item = items.find((item) => item.id === id);
 	if (item) {
 		Object.assign(item, updates);
+		notifyStateChange();
 	}
 }
 
 function setItems(newItems: ReceiptItem[]): void {
 	items.length = 0;
 	items.push(...newItems);
+	notifyStateChange();
 }
 
 function addPerson(name: string): Person {
@@ -105,6 +118,7 @@ function addPerson(name: string): Person {
 	};
 	colorIndex++;
 	people.push(newPerson);
+	notifyStateChange();
 	return newPerson;
 }
 
@@ -121,6 +135,7 @@ function removePerson(id: string): void {
 			item.assignedTo.splice(assignmentIndex, 1);
 		}
 	}
+	notifyStateChange();
 }
 
 function toggleAssignment(itemId: string, personId: string): void {
@@ -133,10 +148,12 @@ function toggleAssignment(itemId: string, personId: string): void {
 	} else {
 		item.assignedTo.splice(index, 1);
 	}
+	notifyStateChange();
 }
 
 function updateSettings(updates: Partial<BillSettings>): void {
 	Object.assign(settings, updates);
+	notifyStateChange();
 }
 
 function setRawOcrText(text: string): void {
@@ -152,6 +169,35 @@ function resetAll(): void {
 	settings.cashBackPercent = 0;
 	rawOcrText = '';
 	colorIndex = 0;
+	notifyStateChange();
+}
+
+// State sync functions for peer communication
+function getState() {
+	return {
+		items: JSON.parse(JSON.stringify(items)),
+		people: JSON.parse(JSON.stringify(people)),
+		settings: JSON.parse(JSON.stringify(settings)),
+		colorIndex
+	};
+}
+
+function setState(state: {
+	items: ReceiptItem[];
+	people: Person[];
+	settings: BillSettings;
+	colorIndex: number;
+}): void {
+	items.length = 0;
+	items.push(...state.items);
+	people.length = 0;
+	people.push(...state.people);
+	Object.assign(settings, state.settings);
+	colorIndex = state.colorIndex;
+}
+
+function setOnStateChange(callback: (() => void) | null): void {
+	onStateChange = callback;
 }
 
 // Export reactive getters and actions
@@ -198,5 +244,10 @@ export const billStore = {
 	toggleAssignment,
 	updateSettings,
 	setRawOcrText,
-	resetAll
+	resetAll,
+
+	// Peer sync functions
+	getState,
+	setState,
+	setOnStateChange
 };

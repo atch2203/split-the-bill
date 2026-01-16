@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { ReceiptItem } from '$lib/types';
-	import { billStore } from '$lib/stores/billStore.svelte';
+	import { syncedBillStore } from '$lib/stores/syncedBillStore.svelte';
 	import PersonBadge from './PersonBadge.svelte';
 	import { formatPrice, parsePrice } from '$lib/utils/receiptParser';
 
@@ -36,7 +36,7 @@
 	}
 
 	function saveEditing() {
-		billStore.updateItem(item.id, {
+		syncedBillStore.updateItem(item.id, {
 			name: editName.trim() || 'Item',
 			price: parsePrice(editPrice),
 			quantity: Math.max(1, parseInt(editQuantity) || 1)
@@ -128,12 +128,12 @@
 
 				<!-- Person Assignment -->
 				<div class="mt-2 flex flex-wrap gap-1">
-					{#if billStore.people.length > 0}
-						{#each billStore.people as person (person.id)}
+					{#if syncedBillStore.people.length > 0}
+						{#each syncedBillStore.people as person (person.id)}
 							<PersonBadge
 								{person}
 								selected={item.assignedTo.includes(person.id)}
-								onclick={() => billStore.toggleAssignment(item.id, person.id)}
+								onclick={() => syncedBillStore.toggleAssignment(item.id, person.id)}
 							/>
 						{/each}
 					{:else}
@@ -145,7 +145,7 @@
 			<div class="flex items-center gap-2">
 				<span class="font-semibold text-gray-800">{formatPrice(totalPrice)}</span>
 				<button
-					onclick={() => billStore.removeItem(item.id)}
+					onclick={() => syncedBillStore.removeItem(item.id)}
 					class="rounded p-1 text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600"
 					title="Remove item"
 				>

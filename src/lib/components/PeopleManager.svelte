@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { billStore } from '$lib/stores/billStore.svelte';
+	import { syncedBillStore } from '$lib/stores/syncedBillStore.svelte';
 	import PersonBadge from './PersonBadge.svelte';
 
 	let newPersonName = $state('');
@@ -8,7 +8,7 @@
 	function handleAddPerson() {
 		const name = newPersonName.trim();
 		if (name) {
-			billStore.addPerson(name);
+			syncedBillStore.addPerson(name);
 			newPersonName = '';
 			inputElement?.focus();
 		}
@@ -45,13 +45,13 @@
 		</div>
 
 		<!-- People List -->
-		{#if billStore.people.length > 0}
+		{#if syncedBillStore.people.length > 0}
 			<div class="flex flex-wrap gap-2">
-				{#each billStore.people as person (person.id)}
+				{#each syncedBillStore.people as person (person.id)}
 					<PersonBadge
 						{person}
 						showRemove={true}
-						onremove={() => billStore.removePerson(person.id)}
+						onremove={() => syncedBillStore.removePerson(person.id)}
 					/>
 				{/each}
 			</div>
