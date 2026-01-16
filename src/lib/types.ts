@@ -29,6 +29,24 @@ export interface PersonTotal {
 	grandTotal: number; // Final amount owed
 }
 
+// Multiplayer types
+export interface BillState {
+	items: ReceiptItem[];
+	people: Person[];
+	settings: BillSettings;
+	rawOcrText: string;
+	colorIndex: number;
+}
+
+export interface StateUpdate {
+	action: string;
+	data: unknown;
+}
+
+export interface Peer {
+	peerId: string;
+}
+
 // Color palette for person badges
 export const PERSON_COLORS = [
 	'#f87171', // red-400

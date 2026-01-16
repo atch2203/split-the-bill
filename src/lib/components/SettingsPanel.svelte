@@ -1,49 +1,72 @@
 <script lang="ts">
 	import { billStore } from '$lib/stores/billStore.svelte';
 	import { parsePrice, formatPrice } from '$lib/utils/receiptParser';
+	import { untrack } from 'svelte';
 
-	let taxInput = $state(billStore.settings.taxAmount.toString());
+	let taxInput = $state(billStore.settings.taxAmount > 0 ? billStore.settings.taxAmount.toFixed(2) : '');
 	let tipPercentInput = $state(billStore.settings.tipPercent.toString());
 	let tipAmountInput = $state('');
 	let cashBackPercentInput = $state(billStore.settings.cashBackPercent.toString());
 
 	let tipMode = $state<'percent' | 'dollar'>('percent');
 
-	// Sync tax input when store is updated externally (e.g., from receipt scanner)
-	$effect(() => {
-		const storeValue = billStore.settings.taxAmount;
-		const inputValue = parsePrice(taxInput);
-		if (storeValue !== inputValue) {
-			taxInput = storeValue > 0 ? storeValue.toFixed(2) : '';
-		}
-	});
+	// Track previous store values to detect external changes
+	let prevTaxAmount = $state(billStore.settings.taxAmount);
+	let prevTipAmount = $state(billStore.settings.tipAmount);
+	let prevTipPercent = $state(billStore.settings.tipPercent);
+	let prevCashBackPercent = $state(billStore.settings.cashBackPercent);
 
-	// Sync tip amount input when store is updated externally (e.g., from receipt scanner)
+	// Sync inputs when store is updated externally (e.g., from receipt scanner or multiplayer)
 	$effect(() => {
-		const storeValue = billStore.settings.tipAmount;
-		const inputValue = parsePrice(tipAmountInput);
-		if (storeValue > 0 && storeValue !== inputValue) {
-			tipAmountInput = storeValue.toFixed(2);
-			tipMode = 'dollar';
+		const storeTax = billStore.settings.taxAmount;
+		const storeTipAmount = billStore.settings.tipAmount;
+		const storeTipPercent = billStore.settings.tipPercent;
+		const storeCashBack = billStore.settings.cashBackPercent;
+
+		// Only update inputs if store changed externally (not from our own updates)
+		if (storeTax !== prevTaxAmount) {
+			taxInput = storeTax > 0 ? storeTax.toFixed(2) : '';
+			prevTaxAmount = storeTax;
+		}
+		if (storeTipAmount !== prevTipAmount) {
+			if (storeTipAmount > 0) {
+				tipAmountInput = storeTipAmount.toFixed(2);
+				tipMode = 'dollar';
+			}
+			prevTipAmount = storeTipAmount;
+		}
+		if (storeTipPercent !== prevTipPercent) {
+			tipPercentInput = storeTipPercent.toString();
+			prevTipPercent = storeTipPercent;
+		}
+		if (storeCashBack !== prevCashBackPercent) {
+			cashBackPercentInput = storeCashBack.toString();
+			prevCashBackPercent = storeCashBack;
 		}
 	});
 
 	function updateTax() {
-		billStore.updateSettings({ taxAmount: parsePrice(taxInput) });
+		const value = parsePrice(taxInput);
+		prevTaxAmount = value;
+		billStore.updateSettings({ taxAmount: value });
 	}
 
 	function updateTipPercent() {
 		const percent = Math.max(0, Math.min(100, parseFloat(tipPercentInput) || 0));
+		prevTipPercent = percent;
+		prevTipAmount = 0;
 		billStore.updateSettings({ tipPercent: percent, tipAmount: 0 });
 	}
 
 	function updateTipAmount() {
 		const amount = parsePrice(tipAmountInput);
+		prevTipAmount = amount;
 		billStore.updateSettings({ tipAmount: amount });
 	}
 
 	function updateCashBackPercent() {
 		const percent = Math.max(0, Math.min(100, parseFloat(cashBackPercentInput) || 0));
+		prevCashBackPercent = percent;
 		billStore.updateSettings({ cashBackPercent: percent });
 	}
 
@@ -56,6 +79,7 @@
 		} else {
 			tipMode = 'percent';
 			// Clear the fixed tip amount, revert to percentage
+			prevTipAmount = 0;
 			billStore.updateSettings({ tipAmount: 0 });
 		}
 	}

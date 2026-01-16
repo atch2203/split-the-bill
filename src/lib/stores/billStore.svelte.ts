@@ -1,5 +1,9 @@
-import type { ReceiptItem, Person, BillSettings, PersonTotal } from '$lib/types';
+import type { ReceiptItem, Person, BillSettings, PersonTotal, BillState, StateUpdate } from '$lib/types';
 import { PERSON_COLORS } from '$lib/types';
+
+// Sync state
+let isSyncing = false;
+let broadcastFn: ((update: StateUpdate) => void) | null = null;
 
 // Generate unique IDs
 function generateId(): string {
@@ -75,6 +79,9 @@ function addItem(name: string = 'New Item', price: number = 0, quantity: number 
 		assignedTo: []
 	};
 	items.push(newItem);
+	if (!isSyncing && broadcastFn) {
+		broadcastFn({ action: 'addItem', data: newItem });
+	}
 	return newItem;
 }
 
@@ -82,6 +89,9 @@ function removeItem(id: string): void {
 	const index = items.findIndex((item) => item.id === id);
 	if (index !== -1) {
 		items.splice(index, 1);
+		if (!isSyncing && broadcastFn) {
+			broadcastFn({ action: 'removeItem', data: id });
+		}
 	}
 }
 
@@ -89,12 +99,18 @@ function updateItem(id: string, updates: Partial<Omit<ReceiptItem, 'id'>>): void
 	const item = items.find((item) => item.id === id);
 	if (item) {
 		Object.assign(item, updates);
+		if (!isSyncing && broadcastFn) {
+			broadcastFn({ action: 'updateItem', data: { id, updates } });
+		}
 	}
 }
 
 function setItems(newItems: ReceiptItem[]): void {
 	items.length = 0;
 	items.push(...newItems);
+	if (!isSyncing && broadcastFn) {
+		broadcastFn({ action: 'setItems', data: newItems });
+	}
 }
 
 function addPerson(name: string): Person {
@@ -105,6 +121,9 @@ function addPerson(name: string): Person {
 	};
 	colorIndex++;
 	people.push(newPerson);
+	if (!isSyncing && broadcastFn) {
+		broadcastFn({ action: 'addPerson', data: { person: newPerson, colorIndex } });
+	}
 	return newPerson;
 }
 
@@ -121,6 +140,9 @@ function removePerson(id: string): void {
 			item.assignedTo.splice(assignmentIndex, 1);
 		}
 	}
+	if (!isSyncing && broadcastFn) {
+		broadcastFn({ action: 'removePerson', data: id });
+	}
 }
 
 function toggleAssignment(itemId: string, personId: string): void {
@@ -133,14 +155,119 @@ function toggleAssignment(itemId: string, personId: string): void {
 	} else {
 		item.assignedTo.splice(index, 1);
 	}
+	if (!isSyncing && broadcastFn) {
+		broadcastFn({ action: 'toggleAssignment', data: { itemId, personId } });
+	}
 }
 
 function updateSettings(updates: Partial<BillSettings>): void {
 	Object.assign(settings, updates);
+	if (!isSyncing && broadcastFn) {
+		broadcastFn({ action: 'updateSettings', data: updates });
+	}
 }
 
 function setRawOcrText(text: string): void {
 	rawOcrText = text;
+	if (!isSyncing && broadcastFn) {
+		broadcastFn({ action: 'setRawOcrText', data: text });
+	}
+}
+
+// Sync methods for multiplayer
+function getSnapshot(): BillState {
+	return {
+		items: items.map((item) => ({ ...item, assignedTo: [...item.assignedTo] })),
+		people: people.map((person) => ({ ...person })),
+		settings: { ...settings },
+		rawOcrText,
+		colorIndex
+	};
+}
+
+function applySnapshot(state: BillState): void {
+	isSyncing = true;
+	try {
+		items.length = 0;
+		items.push(...state.items);
+		people.length = 0;
+		people.push(...state.people);
+		Object.assign(settings, state.settings);
+		rawOcrText = state.rawOcrText;
+		colorIndex = state.colorIndex;
+	} finally {
+		isSyncing = false;
+	}
+}
+
+function applyUpdate(update: StateUpdate): void {
+	isSyncing = true;
+	try {
+		switch (update.action) {
+			case 'addItem':
+				items.push(update.data as ReceiptItem);
+				break;
+			case 'removeItem': {
+				const idx = items.findIndex((i) => i.id === update.data);
+				if (idx !== -1) items.splice(idx, 1);
+				break;
+			}
+			case 'updateItem': {
+				const { id, updates } = update.data as { id: string; updates: Partial<ReceiptItem> };
+				const item = items.find((i) => i.id === id);
+				if (item) Object.assign(item, updates);
+				break;
+			}
+			case 'setItems':
+				items.length = 0;
+				items.push(...(update.data as ReceiptItem[]));
+				break;
+			case 'addPerson': {
+				const { person, colorIndex: newColorIndex } = update.data as {
+					person: Person;
+					colorIndex: number;
+				};
+				people.push(person);
+				colorIndex = newColorIndex;
+				break;
+			}
+			case 'removePerson': {
+				const personId = update.data as string;
+				const personIdx = people.findIndex((p) => p.id === personId);
+				if (personIdx !== -1) people.splice(personIdx, 1);
+				for (const item of items) {
+					const assignmentIdx = item.assignedTo.indexOf(personId);
+					if (assignmentIdx !== -1) item.assignedTo.splice(assignmentIdx, 1);
+				}
+				break;
+			}
+			case 'toggleAssignment': {
+				const { itemId, personId } = update.data as { itemId: string; personId: string };
+				const targetItem = items.find((i) => i.id === itemId);
+				if (targetItem) {
+					const assignIdx = targetItem.assignedTo.indexOf(personId);
+					if (assignIdx === -1) {
+						targetItem.assignedTo.push(personId);
+					} else {
+						targetItem.assignedTo.splice(assignIdx, 1);
+					}
+				}
+				break;
+			}
+			case 'updateSettings':
+				Object.assign(settings, update.data as Partial<BillSettings>);
+				break;
+			case 'setRawOcrText':
+				rawOcrText = update.data as string;
+				break;
+		}
+	} finally {
+		isSyncing = false;
+	}
+}
+
+function setBroadcastFunction(fn: ((update: StateUpdate) => void) | null): void {
+	broadcastFn = fn;
 }
 
 function resetAll(): void {
@@ -198,5 +325,11 @@ export const billStore = {
 	toggleAssignment,
 	updateSettings,
 	setRawOcrText,
-	resetAll
+	resetAll,
+
+	// Sync methods for multiplayer
+	getSnapshot,
+	applySnapshot,
+	applyUpdate,
+	setBroadcastFunction
 };
