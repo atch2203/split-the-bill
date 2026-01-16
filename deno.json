@@ -1,0 +1,6 @@
+{
+  "allowScripts": {
+    "allow": ["npm:@scribe.js/tesseract.js@6.0.4"],
+    "deny": ["npm:esbuild@0.27.2"]
+  }
+}

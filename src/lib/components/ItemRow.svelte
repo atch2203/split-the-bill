@@ -1,0 +1,146 @@
+<script lang="ts">
+	import type { ReceiptItem } from '$lib/types';
+	import { billStore } from '$lib/stores/billStore.svelte';
+	import PersonBadge from './PersonBadge.svelte';
+	import { formatPrice, parsePrice } from '$lib/utils/receiptParser';
+
+	interface Props {
+		item: ReceiptItem;
+	}
+
+	let { item }: Props = $props();
+
+	let isEditing = $state(false);
+	let editName = $state('');
+	let editPrice = $state('');
+	let editQuantity = $state('');
+
+	function startEditing() {
+		editName = item.name;
+		editPrice = item.price.toString();
+		editQuantity = item.quantity.toString();
+		isEditing = true;
+	}
+
+	function saveEditing() {
+		billStore.updateItem(item.id, {
+			name: editName.trim() || 'Item',
+			price: parsePrice(editPrice),
+			quantity: Math.max(1, parseInt(editQuantity) || 1)
+		});
+		isEditing = false;
+	}
+
+	function cancelEditing() {
+		isEditing = false;
+	}
+
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter') {
+			saveEditing();
+		} else if (event.key === 'Escape') {
+			cancelEditing();
+		}
+	}
+
+	const totalPrice = $derived(item.price * item.quantity);
+	const isUnassigned = $derived(item.assignedTo.length === 0);
+</script>
+
+<div
+	class="rounded-lg border p-3 transition-colors {isUnassigned
+		? 'border-yellow-300 bg-yellow-50'
+		: 'border-gray-200 bg-white'}"
+>
+	{#if isEditing}
+		<!-- Edit Mode -->
+		<div class="space-y-2">
+			<div class="flex gap-2">
+				<input
+					bind:value={editName}
+					type="text"
+					placeholder="Item name"
+					class="flex-1 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+					onkeydown={handleKeydown}
+				/>
+				<input
+					bind:value={editQuantity}
+					type="number"
+					min="1"
+					placeholder="Qty"
+					class="w-16 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+					onkeydown={handleKeydown}
+				/>
+				<input
+					bind:value={editPrice}
+					type="text"
+					inputmode="decimal"
+					placeholder="Price"
+					class="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+					onkeydown={handleKeydown}
+				/>
+			</div>
+			<div class="flex justify-end gap-2">
+				<button
+					onclick={cancelEditing}
+					class="rounded px-3 py-1 text-sm text-gray-600 transition-colors hover:bg-gray-100"
+				>
+					Cancel
+				</button>
+				<button
+					onclick={saveEditing}
+					class="rounded bg-blue-500 px-3 py-1 text-sm text-white transition-colors hover:bg-blue-600"
+				>
+					Save
+				</button>
+			</div>
+		</div>
+	{:else}
+		<!-- View Mode -->
+		<div class="flex items-start justify-between gap-2">
+			<div class="flex-1">
+				<div class="flex items-center gap-2">
+					<button
+						onclick={startEditing}
+						class="text-left font-medium text-gray-800 hover:text-blue-600"
+					>
+						{item.name}
+					</button>
+					{#if item.quantity > 1}
+						<span class="text-xs text-gray-500">x{item.quantity}</span>
+					{/if}
+				</div>
+
+				<!-- Person Assignment -->
+				<div class="mt-2 flex flex-wrap gap-1">
+					{#if billStore.people.length > 0}
+						{#each billStore.people as person (person.id)}
+							<PersonBadge
+								{person}
+								selected={item.assignedTo.includes(person.id)}
+								onclick={() => billStore.toggleAssignment(item.id, person.id)}
+							/>
+						{/each}
+					{:else}
+						<span class="text-xs text-gray-400">Add people to assign</span>
+					{/if}
+				</div>
+			</div>
+
+			<div class="flex items-center gap-2">
+				<span class="font-semibold text-gray-800">{formatPrice(totalPrice)}</span>
+				<button
+					onclick={() => billStore.removeItem(item.id)}
+					class="rounded p-1 text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600"
+					title="Remove item"
+				>
+					&#x2715;
+				</button>
+			</div>
+		</div>
+
+		{#if isUnassigned}
+			<div class="mt-2 text-xs text-yellow-700">Not assigned to anyone</div>
+		{/if}
+	{/if}
+</div>
