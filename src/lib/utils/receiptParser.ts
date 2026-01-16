@@ -11,6 +11,7 @@ export interface ParseResult {
 	taxAmount: number | null;
 	subtotal: number | null;
 	total: number | null;
+	tipAmount: number | null;
 }
 
 // Generate unique ID
@@ -73,12 +74,17 @@ const TAX_PATTERNS = [
 	/tax\s*\$?([\d,.\s]+)\s*$/i
 ];
 
+// Label-only patterns (for multi-line detection where value is on next line)
+const TAX_LABEL_PATTERNS = [/^(sales\s*)?tax\s*:?\s*$/i, /^hst\s*:?\s*$/i, /^gst\s*:?\s*$/i, /^pst\s*:?\s*$/i, /^vat\s*:?\s*$/i];
+
 // Patterns that indicate SUBTOTAL line
 const SUBTOTAL_PATTERNS = [
 	/^sub\s*-?\s*total\s*:?\s*\$?([\d,.\s]+)/i,
 	/^subtotal\s*:?\s*\$?([\d,.\s]+)/i,
 	/^sub\s+\$?([\d,.\s]+)/i
 ];
+
+const SUBTOTAL_LABEL_PATTERNS = [/^sub\s*-?\s*total\s*:?\s*$/i, /^subtotal\s*:?\s*$/i];
 
 // Patterns that indicate TOTAL line
 const TOTAL_PATTERNS = [
@@ -87,6 +93,16 @@ const TOTAL_PATTERNS = [
 	/^amount\s*due\s*:?\s*\$?([\d,.\s]+)/i,
 	/^balance\s*due\s*:?\s*\$?([\d,.\s]+)/i
 ];
+
+const TOTAL_LABEL_PATTERNS = [/^(grand\s*)?total\s*:?\s*$/i, /^amount\s*due\s*:?\s*$/i, /^balance\s*due\s*:?\s*$/i];
+
+// Patterns that indicate TIP line
+const TIP_PATTERNS = [
+	/^tip\s*:?\s*\$?([\d,.\s]+)/i,
+	/^gratuity\s*:?\s*\$?([\d,.\s]+)/i
+];
+
+const TIP_LABEL_PATTERNS = [/^tip\s*:?\s*$/i, /^gratuity\s*:?\s*$/i];
 
 // Common words/patterns to skip (not actual menu items)
 const SKIP_PATTERNS = [
@@ -162,6 +178,12 @@ const SKIP_PATTERNS = [
 	/^http/i,
 	/^@/i,
 	/^\d{3}[.\-\s]?\d{3}[.\-\s]?\d{4}/, // Phone numbers
+
+	// Addresses and zip codes
+	/\d{5}(-\d{4})?\s*$/, // US zip code at end of line (12345 or 12345-6789)
+	/[A-Z]\d[A-Z]\s*\d[A-Z]\d\s*$/i, // Canadian postal code at end (A1A 1A1)
+	/^\d+\s+(N\.?|S\.?|E\.?|W\.?|North|South|East|West)?\s*\w+\s+(St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place)\b/i, // Street addresses
+	/,\s*[A-Z]{2}\s+\d{5}/i, // City, ST 12345 pattern
 
 	// Misc
 	/^qty/i,
@@ -309,17 +331,76 @@ function parseLine(line: string): ParsedLine | null {
 	return null;
 }
 
+// Check if a line is just a price (for multi-line item detection)
+function isJustPrice(line: string): number | null {
+	const trimmed = line.trim();
+	// Match lines that are only a price: $12.99, 12.99, 1299, etc.
+	const priceOnlyMatch = trimmed.match(/^[$]?([\d,.\s]+)$/);
+	if (priceOnlyMatch) {
+		const price = normalizePrice(priceOnlyMatch[1]);
+		if (price !== null && price > 0 && price < 1000) {
+			return price;
+		}
+	}
+	return null;
+}
+
+// Check if a line looks like an item name without a price
+function isNameWithoutPrice(line: string): string | null {
+	const trimmed = line.trim();
+	if (!trimmed || trimmed.length < 2) return null;
+	if (shouldSkipLine(trimmed)) return null;
+
+	// Has at least 2 letters and doesn't end with a price pattern
+	const letterCount = (trimmed.match(/[a-zA-Z]/g) || []).length;
+	if (letterCount < 2) return null;
+
+	// Check it doesn't already have a price at the end
+	const hasPrice = /[$]?[\d,.\s]{3,}\s*$/.test(trimmed) || /\d+\.\d{2}\s*$/.test(trimmed);
+	if (hasPrice) return null;
+
+	return trimmed;
+}
+
+// Helper to check for multi-line special field (label on one line, value on next)
+function checkMultiLineField(
+	trimmed: string,
+	nextLine: string | undefined,
+	labelPatterns: RegExp[]
+): number | null {
+	for (const pattern of labelPatterns) {
+		if (pattern.test(trimmed) && nextLine !== undefined) {
+			const price = isJustPrice(nextLine);
+			if (price !== null) {
+				return price;
+			}
+		}
+	}
+	return null;
+}
+
 export function parseReceiptText(text: string): ParseResult {
-	const lines = text.split('\n');
+	// Normalize multiple newlines to single newline
+	const normalizedText = text.replace(/\n{2,}/g, '\n');
+	const lines = normalizedText.split('\n');
 	const items: ReceiptItem[] = [];
 	let taxAmount: number | null = null;
 	let subtotal: number | null = null;
 	let total: number | null = null;
+	let tipAmount: number | null = null;
+	let skipNextLine = false;
 
-	for (const line of lines) {
+	for (let i = 0; i < lines.length; i++) {
+		if (skipNextLine) {
+			skipNextLine = false;
+			continue;
+		}
+
+		const line = lines[i];
 		const trimmed = line.trim();
+		const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : undefined;
 
-		// Check for tax
+		// Check for tax (same line)
 		if (taxAmount === null) {
 			for (const pattern of TAX_PATTERNS) {
 				const match = trimmed.match(pattern);
@@ -332,9 +413,19 @@ export function parseReceiptText(text: string): ParseResult {
 					break;
 				}
 			}
+			// Check for tax (multi-line)
+			if (taxAmount === null) {
+				const multiLineValue = checkMultiLineField(trimmed, nextLine, TAX_LABEL_PATTERNS);
+				if (multiLineValue !== null) {
+					taxAmount = multiLineValue;
+					skipNextLine = true;
+					console.log('[Parser] Found multi-line tax:', taxAmount);
+					continue;
+				}
+			}
 		}
 
-		// Check for subtotal
+		// Check for subtotal (same line)
 		if (subtotal === null) {
 			for (const pattern of SUBTOTAL_PATTERNS) {
 				const match = trimmed.match(pattern);
@@ -347,9 +438,19 @@ export function parseReceiptText(text: string): ParseResult {
 					break;
 				}
 			}
+			// Check for subtotal (multi-line)
+			if (subtotal === null) {
+				const multiLineValue = checkMultiLineField(trimmed, nextLine, SUBTOTAL_LABEL_PATTERNS);
+				if (multiLineValue !== null) {
+					subtotal = multiLineValue;
+					skipNextLine = true;
+					console.log('[Parser] Found multi-line subtotal:', subtotal);
+					continue;
+				}
+			}
 		}
 
-		// Check for total
+		// Check for total (same line)
 		if (total === null) {
 			for (const pattern of TOTAL_PATTERNS) {
 				const match = trimmed.match(pattern);
@@ -362,9 +463,44 @@ export function parseReceiptText(text: string): ParseResult {
 					break;
 				}
 			}
+			// Check for total (multi-line)
+			if (total === null) {
+				const multiLineValue = checkMultiLineField(trimmed, nextLine, TOTAL_LABEL_PATTERNS);
+				if (multiLineValue !== null) {
+					total = multiLineValue;
+					skipNextLine = true;
+					console.log('[Parser] Found multi-line total:', total);
+					continue;
+				}
+			}
 		}
 
-		// Try to parse as menu item
+		// Check for tip (same line)
+		if (tipAmount === null) {
+			for (const pattern of TIP_PATTERNS) {
+				const match = trimmed.match(pattern);
+				if (match) {
+					const value = normalizePrice(match[1]);
+					if (value !== null && value > 0 && value < 1000) {
+						tipAmount = value;
+						console.log('[Parser] Found tip:', tipAmount, 'from line:', trimmed);
+					}
+					break;
+				}
+			}
+			// Check for tip (multi-line)
+			if (tipAmount === null) {
+				const multiLineValue = checkMultiLineField(trimmed, nextLine, TIP_LABEL_PATTERNS);
+				if (multiLineValue !== null) {
+					tipAmount = multiLineValue;
+					skipNextLine = true;
+					console.log('[Parser] Found multi-line tip:', tipAmount);
+					continue;
+				}
+			}
+		}
+
+		// Try to parse as menu item (name and price on same line)
 		const parsed = parseLine(line);
 		if (parsed) {
 			items.push({
@@ -374,12 +510,30 @@ export function parseReceiptText(text: string): ParseResult {
 				quantity: parsed.quantity,
 				assignedTo: []
 			});
+			continue;
+		}
+
+		// Check for multi-line pattern: name on this line, price on next line
+		const name = isNameWithoutPrice(line);
+		if (name && nextLine !== undefined) {
+			const price = isJustPrice(nextLine);
+			if (price !== null) {
+				console.log('[Parser] Found multi-line item:', name, 'price:', price);
+				items.push({
+					id: generateId(),
+					name: name,
+					price: price,
+					quantity: 1,
+					assignedTo: []
+				});
+				skipNextLine = true;
+			}
 		}
 	}
 
-	console.log('[Parser] Parsed', items.length, 'items, tax:', taxAmount, 'subtotal:', subtotal, 'total:', total);
+	console.log('[Parser] Parsed', items.length, 'items, tax:', taxAmount, 'subtotal:', subtotal, 'total:', total, 'tip:', tipAmount);
 
-	return { items, taxAmount, subtotal, total };
+	return { items, taxAmount, subtotal, total, tipAmount };
 }
 
 // Utility to format price for display
