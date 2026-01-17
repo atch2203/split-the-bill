@@ -8,13 +8,17 @@
 	import ShareLinkBanner from '$lib/components/ShareLinkBanner.svelte';
 	import { billStore } from '$lib/stores/billStore.svelte';
 	import { peerStore } from '$lib/stores/peerStore.svelte';
+	import icon from "$lib/assets/favicon.png"
 </script>
 
 <div class="min-h-screen bg-gray-100">
 	<!-- Header -->
 	<header class="bg-white shadow-sm">
 		<div class="mx-auto flex max-w-2xl items-center justify-between px-4 py-4">
+			<div class="flex items-center gap-2">
+			<img src={icon} alt="" class="max-h-8 object-contain" />
 			<h1 class="text-xl font-bold text-gray-900">Split the Bill</h1>
+			</div>
 			<div class="flex items-center gap-2">
 				<ShareButton />
 				{#if !peerStore.isGuest}
