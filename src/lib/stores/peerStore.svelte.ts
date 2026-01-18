@@ -56,6 +56,13 @@ let hostPasscode = $state<string>(''); // Passcode set by host
 let awaitingPasscode = $state<boolean>(false); // Guest waiting to enter passcode
 let pendingConnection = $state<DataConnection | null>(null); // Connection waiting for auth
 
+// Reconnection state
+let lastHostId = $state<string | null>(null); // For guests: the host they were connected to
+let lastPasscode = $state<string>(''); // Passcode used in last connection
+let wasHost = $state<boolean>(false); // Were we hosting before disconnect?
+let canReconnect = $state<boolean>(false); // Can we attempt to reconnect?
+let isReconnecting = $state<boolean>(false); // Currently attempting to reconnect
+
 // Callbacks for store integration
 let onStateSync: ((state: SyncMessage['payload']) => void) | null = null;
 let onAction: ((action: string, args: unknown[]) => void) | null = null;
@@ -105,7 +112,7 @@ async function createPeer(id?: string): Promise<Peer> {
 }
 
 // Host: start sharing and wait for connections
-async function startHost(passcode: string = ''): Promise<string> {
+async function startHost(passcode: string = '', existingId?: string): Promise<string> {
 	if (peer) {
 		peer.destroy();
 	}
@@ -113,8 +120,32 @@ async function startHost(passcode: string = ''): Promise<string> {
 	isHost = true;
 	hostPasscode = passcode;
 	error = null;
+	canReconnect = false;
+	isReconnecting = false;
 
-	const newPeer = await createPeer();
+	const newPeer = await createPeer(existingId);
+
+	// Save for reconnection
+	wasHost = true;
+	lastPasscode = passcode;
+
+	// Handle peer disconnection/error for reconnection
+	newPeer.on('disconnected', () => {
+		console.log('Host peer disconnected from server');
+		if (!canReconnect && isHost) {
+			canReconnect = true;
+			isConnected = false;
+			error = 'Disconnected from server';
+		}
+	});
+
+	newPeer.on('close', () => {
+		console.log('Host peer closed');
+		if (!canReconnect && isHost) {
+			canReconnect = true;
+			isConnected = false;
+		}
+	});
 
 	newPeer.on('connection', (conn) => {
 		console.log('Guest attempting to connect:', conn.peer);
@@ -173,9 +204,34 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 	isHost = false;
 	error = null;
 	awaitingPasscode = false;
+	canReconnect = false;
+	isReconnecting = false;
+
+	// Save for reconnection
+	lastHostId = hostId;
+	lastPasscode = passcode;
+	wasHost = false;
 
 	const providedPasscode = passcode;
 	const newPeer = await createPeer();
+
+	// Handle peer disconnection for reconnection
+	newPeer.on('disconnected', () => {
+		console.log('Guest peer disconnected from server');
+		if (!canReconnect && !isHost && lastHostId) {
+			canReconnect = true;
+			isConnected = false;
+			error = 'Disconnected from server';
+		}
+	});
+
+	newPeer.on('close', () => {
+		console.log('Guest peer closed');
+		if (!canReconnect && !isHost && lastHostId) {
+			canReconnect = true;
+			isConnected = false;
+		}
+	});
 
 	return new Promise((resolve, reject) => {
 		const conn = newPeer.connect(hostId, { reliable: true });
@@ -223,6 +279,10 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 			if (!error) {
 				error = 'Disconnected from host';
 			}
+			// Enable reconnection if we had a valid connection
+			if (lastHostId && !canReconnect) {
+				canReconnect = true;
+			}
 		});
 
 		conn.on('error', (err) => {
@@ -244,6 +304,38 @@ function submitPasscode(passcode: string): void {
 	if (pendingConnection && awaitingPasscode) {
 		pendingConnection.send({ type: 'authResponse', passcode } as AuthResponseMessage);
 	}
+}
+
+// Reconnect after disconnection
+async function reconnect(): Promise<void> {
+	if (!canReconnect || isReconnecting) return;
+
+	isReconnecting = true;
+	error = null;
+
+	try {
+		if (wasHost && peerId) {
+			// Host: restart with same ID
+			await startHost(lastPasscode, peerId);
+		} else if (lastHostId) {
+			// Guest: reconnect to host
+			await joinHost(lastHostId, lastPasscode);
+		}
+		canReconnect = false;
+	} catch (err) {
+		error = err instanceof Error ? err.message : 'Reconnection failed';
+		canReconnect = true;
+	} finally {
+		isReconnecting = false;
+	}
+}
+
+// Clear reconnection state
+function clearReconnect(): void {
+	canReconnect = false;
+	lastHostId = null;
+	lastPasscode = '';
+	wasHost = false;
 }
 
 // Host: broadcast state to all guests
@@ -298,6 +390,8 @@ function disconnect(): void {
 	totalUsers = 1;
 	hostPasscode = '';
 	awaitingPasscode = false;
+	// Clear reconnection state on intentional disconnect
+	clearReconnect();
 }
 
 // Get share URL
@@ -348,10 +442,15 @@ export const peerStore = {
 	get error() { return error; },
 	get awaitingPasscode() { return awaitingPasscode; },
 	get hasPasscode() { return !!hostPasscode; },
+	get canReconnect() { return canReconnect; },
+	get isReconnecting() { return isReconnecting; },
+	get wasHost() { return wasHost; },
 
 	startHost,
 	joinHost,
 	submitPasscode,
+	reconnect,
+	clearReconnect,
 	broadcastState,
 	sendAction,
 	disconnect,

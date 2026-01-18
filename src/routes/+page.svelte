@@ -53,7 +53,7 @@
 	<footer class="py-8 text-center text-sm text-gray-500">
 		<p>All calculations, image processing, and OCR are done locally in your browser.</p>
 		{#if peerStore.isConnected}
-			<p class="mt-1">Synced in real-time with connected users (P2P) with no data stored anywhere.</p>
+			<p class="mt-1">Synced in real-time with connected users (P2P) with no data stored outside of user devices.</p>
 		{/if}
 	</footer>
 </div>
