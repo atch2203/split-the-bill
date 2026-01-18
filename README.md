@@ -1,38 +1,46 @@
-# sv
+# Split the Bill
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A privacy-focused web app for splitting restaurant bills with friends. Scan or paste your receipt, assign items to people, and calculate who owes what - all processed locally in your browser.
 
-## Creating a project
+## Features
 
-If you're seeing this, you've probably already done this step. Congrats!
+- **Receipt Parsing** - Paste text from Google Lens or Apple Live Text, or use built-in OCR to scan receipt images
+- **Smart Item Detection** - Automatically extracts items, prices, tax, and tip from receipt text
+- **Quantity Support** - Handles items with quantities (e.g., "2x Burger $25.98")
+- **Easy Assignment** - Tap to assign items to people, split items between multiple people
+- **Real-time Sync** - Share a link to collaborate with friends in real-time using peer-to-peer connections
+- **Passcode Protection** - Optionally protect shared sessions with a passcode
+- **Automatic Calculations** - Proportionally splits tax and tip based on each person's items
+- **Cash Back Support** - Factor in credit card cash back rewards
 
-```sh
-# create a new project in the current directory
-npx sv create
+## Privacy
 
-# create a new project in my-app
-npx sv create my-app
-```
+- All calculations, image processing, and OCR are done locally in your browser
+- Real-time sync uses peer-to-peer (P2P) WebRTC connections - no data is stored on servers
+- No accounts, no tracking, no data collection
 
-## Developing
+## Tech Stack
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+- [SvelteKit](https://kit.svelte.dev/) with Svelte 5
+- [Tailwind CSS](https://tailwindcss.com/) v4
+- [Tesseract.js](https://tesseract.projectnaptha.com/) for OCR
+- [PeerJS](https://peerjs.com/) for P2P real-time sync
 
-```sh
-npm run dev
+## Try It
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+**[https://atch2203.github.io/split-the-bill](https://atch2203.github.io/split-the-bill)**
 
-## Building
+## Usage
 
-To create a production version of your app:
+1. **Add Receipt** - Paste receipt text (from Google Lens or Live Text) or scan an image
+2. **Add People** - Enter names of people splitting the bill
+3. **Assign Items** - Tap on person badges to assign items to them
+4. **Adjust Settings** - Set tax, tip percentage, and optional cash back
+5. **View Summary** - See the breakdown of what each person owes
 
-```sh
-npm run build
-```
+### Sharing with Friends
 
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+1. Click the **Share** button to start a session
+2. Optionally set a passcode for the session
+3. Share the link with friends
+4. Everyone can assign items in real-time
