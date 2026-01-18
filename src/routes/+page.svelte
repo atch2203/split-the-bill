@@ -4,6 +4,7 @@
 	import ItemList from '$lib/components/ItemList.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 	import PaymentSummary from '$lib/components/PaymentSummary.svelte';
+	import ExportImport from '$lib/components/ExportImport.svelte';
 	import ShareButton from '$lib/components/ShareButton.svelte';
 	import ShareLinkBanner from '$lib/components/ShareLinkBanner.svelte';
 	import { billStore } from '$lib/stores/billStore.svelte';
@@ -47,6 +48,7 @@
 		<ItemList />
 		<SettingsPanel />
 		<PaymentSummary />
+		<ExportImport />
 	</main>
 
 	<!-- Footer -->

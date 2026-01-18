@@ -369,16 +369,6 @@ function isNameWithoutPrice(line: string): { name: string; quantity: number } | 
 		}
 	}
 
-	// Check for quantity suffix: "Item Name x2" or "Item Name 2x"
-	const qtySuffixMatch = trimmed.match(/^(.+?)\s+[x@]?(\d{1,2})[x@]?\s*$/i);
-	if (qtySuffixMatch) {
-		const name = qtySuffixMatch[1].trim();
-		const quantity = parseInt(qtySuffixMatch[2], 10);
-		if (quantity > 0 && quantity <= 20 && name.length >= 2 && !shouldSkipLine(name)) {
-			return { name, quantity };
-		}
-	}
-
 	return { name: trimmed, quantity: 1 };
 }
 
