@@ -11,8 +11,9 @@
 	let showProcessed = $state(false);
 
 	// Input mode: 'scan' for OCR, 'text' for manual text entry
-	let inputMode = $state<'scan' | 'text'>('scan');
+	let inputMode = $state<'scan' | 'text'>('text');
 	let manualText = $state('');
+	let showInstructions = $state(false);
 
 	async function handleFileSelect(event: Event) {
 		const input = event.target as HTMLInputElement;
@@ -459,6 +460,23 @@
 		{:else}
 			<!-- Text Input Mode -->
 			<div class="space-y-3">
+				<!-- Instructions -->
+				<div class="rounded-lg bg-blue-50">
+					<button
+						onclick={() => (showInstructions = !showInstructions)}
+						class="flex w-full items-center justify-between p-3 text-sm font-medium text-blue-800"
+					>
+						<span>How to extract text from your receipt</span>
+						<span class="text-xs">{showInstructions ? '▲' : '▼'}</span>
+					</button>
+					{#if showInstructions}
+						<ul class="list-inside list-disc space-y-1 px-3 pb-3 text-sm text-blue-700">
+							<li><strong>iPhone/iPad:</strong> Open Camera, point at receipt, tap the Live Text icon, select all text, copy and paste here</li>
+							<li><strong>Android:</strong> Open Google Lens (or hold the photo in Gallery), select all text, copy and paste here</li>
+						</ul>
+					{/if}
+				</div>
+
 				<textarea
 					bind:value={manualText}
 					placeholder="Paste or type receipt text here...&#10;&#10;Example:&#10;Burger $12.99&#10;Fries $4.50&#10;Drink $2.99"

@@ -345,8 +345,8 @@ function isJustPrice(line: string): number | null {
 	return null;
 }
 
-// Check if a line looks like an item name without a price
-function isNameWithoutPrice(line: string): string | null {
+// Check if a line looks like an item name without a price, with optional quantity
+function isNameWithoutPrice(line: string): { name: string; quantity: number } | null {
 	const trimmed = line.trim();
 	if (!trimmed || trimmed.length < 2) return null;
 	if (shouldSkipLine(trimmed)) return null;
@@ -359,7 +359,27 @@ function isNameWithoutPrice(line: string): string | null {
 	const hasPrice = /[$]?[\d,.\s]{3,}\s*$/.test(trimmed) || /\d+\.\d{2}\s*$/.test(trimmed);
 	if (hasPrice) return null;
 
-	return trimmed;
+	// Check for quantity prefix: "2x Item Name" or "2 Item Name"
+	const qtyPrefixMatch = trimmed.match(/^(\d{1,2})\s*[x@]?\s+(.+)$/i);
+	if (qtyPrefixMatch) {
+		const quantity = parseInt(qtyPrefixMatch[1], 10);
+		const name = qtyPrefixMatch[2].trim();
+		if (quantity > 0 && quantity <= 20 && name.length >= 2 && !shouldSkipLine(name)) {
+			return { name, quantity };
+		}
+	}
+
+	// Check for quantity suffix: "Item Name x2" or "Item Name 2x"
+	const qtySuffixMatch = trimmed.match(/^(.+?)\s+[x@]?(\d{1,2})[x@]?\s*$/i);
+	if (qtySuffixMatch) {
+		const name = qtySuffixMatch[1].trim();
+		const quantity = parseInt(qtySuffixMatch[2], 10);
+		if (quantity > 0 && quantity <= 20 && name.length >= 2 && !shouldSkipLine(name)) {
+			return { name, quantity };
+		}
+	}
+
+	return { name: trimmed, quantity: 1 };
 }
 
 // Helper to check for multi-line special field (label on one line, value on next)
@@ -514,16 +534,18 @@ export function parseReceiptText(text: string): ParseResult {
 		}
 
 		// Check for multi-line pattern: name on this line, price on next line
-		const name = isNameWithoutPrice(line);
-		if (name && nextLine !== undefined) {
-			const price = isJustPrice(nextLine);
-			if (price !== null) {
-				console.log('[Parser] Found multi-line item:', name, 'price:', price);
+		const nameResult = isNameWithoutPrice(line);
+		if (nameResult && nextLine !== undefined) {
+			const totalPrice = isJustPrice(nextLine);
+			if (totalPrice !== null) {
+				// Divide total price by quantity to get per-unit price
+				const price = Math.round((totalPrice / nameResult.quantity) * 100) / 100;
+				console.log('[Parser] Found multi-line item:', nameResult.name, 'qty:', nameResult.quantity, 'price:', price);
 				items.push({
 					id: generateId(),
-					name: name,
+					name: nameResult.name,
 					price: price,
-					quantity: 1,
+					quantity: nameResult.quantity,
 					assignedTo: []
 				});
 				skipNextLine = true;

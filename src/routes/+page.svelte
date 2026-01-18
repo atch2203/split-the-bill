@@ -55,5 +55,6 @@
 		{#if peerStore.isConnected}
 			<p class="mt-1">Synced in real-time with connected users (P2P) with no data stored outside of user devices.</p>
 		{/if}
+		<p class="mt-1">Feel free to report issues or request features on <a href="https://github.com/atch2203/split-the-bill/issues" class="text-blue-600 underline hover:text-blue-800">github</a>, or check out some of my other work on my <a href="https://atch2203.github.io" class="text-blue-600 underline hover:text-blue-800">main site</a>!</p>
 	</footer>
 </div>

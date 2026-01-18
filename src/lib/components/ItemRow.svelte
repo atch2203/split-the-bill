@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ReceiptItem } from '$lib/types';
 	import { syncedBillStore } from '$lib/stores/syncedBillStore.svelte';
+	import { peerStore } from '$lib/stores/peerStore.svelte';
 	import PersonBadge from './PersonBadge.svelte';
 	import { formatPrice, parsePrice } from '$lib/utils/receiptParser';
 
@@ -115,15 +116,19 @@
 		<div class="flex items-start justify-between gap-2">
 			<div class="flex-1">
 				<div class="flex items-center gap-2">
-					<button
-						onclick={startEditing}
-						class="text-left font-medium text-gray-800 hover:text-blue-600"
-					>
-						{item.name}
-					</button>
+					<span class="font-medium text-gray-800">{item.name}</span>
 					{#if item.quantity > 1}
 						<span class="text-xs text-gray-500">x{item.quantity}</span>
 					{/if}
+					<button
+						onclick={startEditing}
+						class="rounded p-1 text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600"
+						title="Edit item"
+					>
+						<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+						</svg>
+					</button>
 				</div>
 
 				<!-- Person Assignment -->
@@ -144,13 +149,17 @@
 
 			<div class="flex items-center gap-2">
 				<span class="font-semibold text-gray-800">{formatPrice(totalPrice)}</span>
-				<button
-					onclick={() => syncedBillStore.removeItem(item.id)}
-					class="rounded p-1 text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600"
-					title="Remove item"
-				>
-					&#x2715;
-				</button>
+				{#if !peerStore.isGuest}
+					<button
+						onclick={() => syncedBillStore.removeItem(item.id)}
+						class="rounded p-1 text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600"
+						title="Remove item"
+					>
+						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				{/if}
 			</div>
 		</div>
 
