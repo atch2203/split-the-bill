@@ -6,6 +6,13 @@ interface ParsedLine {
 	quantity: number;
 }
 
+interface PendingItem {
+	name: string;
+	quantity: number;
+	unitPrice: number | null;
+	lineTotal: number | null;
+}
+
 export interface ParseResult {
 	items: ReceiptItem[];
 	taxAmount: number | null;
@@ -389,6 +396,46 @@ function checkMultiLineField(
 	return null;
 }
 
+// Matches a line that is just a bare positive integer (standalone quantity, e.g. "2")
+function isQtyOnlyLine(line: string): number | null {
+	const trimmed = line.trim();
+	const match = trimmed.match(/^(\d{1,3})$/);
+	if (!match) return null;
+	const qty = parseInt(match[1], 10);
+	return qty > 0 && qty <= 99 ? qty : null;
+}
+
+// Matches lines of the form "N @ $X.XX" or "Nx $X.XX" (quantity + unit price, no name)
+function isQtyUnitLine(line: string): { quantity: number; unitPrice: number } | null {
+	const trimmed = line.trim();
+	const match = trimmed.match(/^(\d{1,3})\s*[@x]\s*\$?([\d,.\s]+)\s*$/i);
+	if (!match) return null;
+	const quantity = parseInt(match[1], 10);
+	const unitPrice = normalizePrice(match[2]);
+	if (quantity > 0 && quantity <= 99 && unitPrice !== null && unitPrice > 0 && unitPrice < 1000) {
+		return { quantity, unitPrice };
+	}
+	return null;
+}
+
+// Build a ReceiptItem from a completed PendingItem, or null if price is missing
+function buildItem(pending: PendingItem): ReceiptItem | null {
+	let price: number | null = null;
+	if (pending.unitPrice !== null) {
+		price = pending.unitPrice;
+	} else if (pending.lineTotal !== null) {
+		price = Math.round((pending.lineTotal / pending.quantity) * 100) / 100;
+	}
+	if (price === null || price <= 0) return null;
+	return {
+		id: generateId(),
+		name: pending.name,
+		price,
+		quantity: pending.quantity,
+		assignedTo: []
+	};
+}
+
 export function parseReceiptText(text: string): ParseResult {
 	// Normalize multiple newlines to single newline
 	const normalizedText = text.replace(/\n{2,}/g, '\n');
@@ -398,37 +445,52 @@ export function parseReceiptText(text: string): ParseResult {
 	let subtotal: number | null = null;
 	let total: number | null = null;
 	let tipAmount: number | null = null;
-	let skipNextLine = false;
+	let pending: PendingItem | null = null;
+	let qtyStash: number | null = null;
 
-	for (let i = 0; i < lines.length; i++) {
-		if (skipNextLine) {
-			skipNextLine = false;
-			continue;
+	function flushPending() {
+		if (pending !== null) {
+			const item = buildItem(pending);
+			if (item) {
+				console.log('[Parser] Emitting pending item:', item.name, 'qty:', item.quantity, 'price:', item.price);
+				items.push(item);
+			}
+			pending = null;
 		}
+	}
 
+	let i = 0;
+	while (i < lines.length) {
 		const line = lines[i];
 		const trimmed = line.trim();
 		const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : undefined;
+		i++;
+
+		if (!trimmed) continue;
 
 		// Check for tax (same line)
 		if (taxAmount === null) {
+			let matched = false;
 			for (const pattern of TAX_PATTERNS) {
 				const match = trimmed.match(pattern);
 				if (match) {
 					const value = normalizePrice(match[1]);
 					if (value !== null && value > 0 && value < 1000) {
 						taxAmount = value;
+						flushPending();
 						console.log('[Parser] Found tax:', taxAmount, 'from line:', trimmed);
 					}
+					matched = true;
 					break;
 				}
 			}
 			// Check for tax (multi-line)
-			if (taxAmount === null) {
+			if (!matched) {
 				const multiLineValue = checkMultiLineField(trimmed, nextLine, TAX_LABEL_PATTERNS);
 				if (multiLineValue !== null) {
 					taxAmount = multiLineValue;
-					skipNextLine = true;
+					flushPending();
+					i++;
 					console.log('[Parser] Found multi-line tax:', taxAmount);
 					continue;
 				}
@@ -437,23 +499,27 @@ export function parseReceiptText(text: string): ParseResult {
 
 		// Check for subtotal (same line)
 		if (subtotal === null) {
+			let matched = false;
 			for (const pattern of SUBTOTAL_PATTERNS) {
 				const match = trimmed.match(pattern);
 				if (match) {
 					const value = normalizePrice(match[1]);
 					if (value !== null && value > 0) {
 						subtotal = value;
+						flushPending();
 						console.log('[Parser] Found subtotal:', subtotal, 'from line:', trimmed);
 					}
+					matched = true;
 					break;
 				}
 			}
 			// Check for subtotal (multi-line)
-			if (subtotal === null) {
+			if (!matched) {
 				const multiLineValue = checkMultiLineField(trimmed, nextLine, SUBTOTAL_LABEL_PATTERNS);
 				if (multiLineValue !== null) {
 					subtotal = multiLineValue;
-					skipNextLine = true;
+					flushPending();
+					i++;
 					console.log('[Parser] Found multi-line subtotal:', subtotal);
 					continue;
 				}
@@ -462,23 +528,27 @@ export function parseReceiptText(text: string): ParseResult {
 
 		// Check for total (same line)
 		if (total === null) {
+			let matched = false;
 			for (const pattern of TOTAL_PATTERNS) {
 				const match = trimmed.match(pattern);
 				if (match) {
 					const value = normalizePrice(match[1]);
 					if (value !== null && value > 0) {
 						total = value;
+						flushPending();
 						console.log('[Parser] Found total:', total, 'from line:', trimmed);
 					}
+					matched = true;
 					break;
 				}
 			}
 			// Check for total (multi-line)
-			if (total === null) {
+			if (!matched) {
 				const multiLineValue = checkMultiLineField(trimmed, nextLine, TOTAL_LABEL_PATTERNS);
 				if (multiLineValue !== null) {
 					total = multiLineValue;
-					skipNextLine = true;
+					flushPending();
+					i++;
 					console.log('[Parser] Found multi-line total:', total);
 					continue;
 				}
@@ -487,32 +557,37 @@ export function parseReceiptText(text: string): ParseResult {
 
 		// Check for tip (same line)
 		if (tipAmount === null) {
+			let matched = false;
 			for (const pattern of TIP_PATTERNS) {
 				const match = trimmed.match(pattern);
 				if (match) {
 					const value = normalizePrice(match[1]);
 					if (value !== null && value > 0 && value < 1000) {
 						tipAmount = value;
+						flushPending();
 						console.log('[Parser] Found tip:', tipAmount, 'from line:', trimmed);
 					}
+					matched = true;
 					break;
 				}
 			}
 			// Check for tip (multi-line)
-			if (tipAmount === null) {
+			if (!matched) {
 				const multiLineValue = checkMultiLineField(trimmed, nextLine, TIP_LABEL_PATTERNS);
 				if (multiLineValue !== null) {
 					tipAmount = multiLineValue;
-					skipNextLine = true;
+					flushPending();
+					i++;
 					console.log('[Parser] Found multi-line tip:', tipAmount);
 					continue;
 				}
 			}
 		}
 
-		// Try to parse as menu item (name and price on same line)
+		// 1. Try full single-line item parse first
 		const parsed = parseLine(line);
 		if (parsed) {
+			flushPending();
 			items.push({
 				id: generateId(),
 				name: parsed.name,
@@ -523,26 +598,65 @@ export function parseReceiptText(text: string): ParseResult {
 			continue;
 		}
 
-		// Check for multi-line pattern: name on this line, price on next line
-		const nameResult = isNameWithoutPrice(line);
-		if (nameResult && nextLine !== undefined) {
-			const totalPrice = isJustPrice(nextLine);
-			if (totalPrice !== null) {
-				// Divide total price by quantity to get per-unit price
-				const price = Math.round((totalPrice / nameResult.quantity) * 100) / 100;
-				console.log('[Parser] Found multi-line item:', nameResult.name, 'qty:', nameResult.quantity, 'price:', price);
-				items.push({
-					id: generateId(),
-					name: nameResult.name,
-					price: price,
-					quantity: nameResult.quantity,
-					assignedTo: []
-				});
-				skipNextLine = true;
+		// 2. Qty @ unitPrice line (e.g. "1 @ $7.99", "2x $5.00") — attaches to pending item
+		const qtyUnit = isQtyUnitLine(trimmed);
+		if (qtyUnit !== null) {
+			if (pending !== null) {
+				pending.quantity = qtyUnit.quantity;
+				pending.unitPrice = qtyUnit.unitPrice;
+				console.log('[Parser] Updated pending qty:', pending.quantity, 'unitPrice:', pending.unitPrice);
 			}
+			continue;
 		}
+
+		// 2.5. Bare integer line (e.g. "2") — quantity, not a price.
+		// Use lookahead: if the next line is a name, this qty belongs to that next item;
+		// otherwise attach it to the current pending item (or stash it).
+		const qtyOnly = isQtyOnlyLine(trimmed);
+		if (qtyOnly !== null) {
+			const nextIsName = nextLine !== undefined && isNameWithoutPrice(nextLine) !== null;
+			if (nextIsName) {
+				// Qty precedes a new item name → flush incomplete pending and stash
+				flushPending();
+				qtyStash = qtyOnly;
+			} else if (pending !== null) {
+				pending.quantity = qtyOnly;
+			} else {
+				qtyStash = qtyOnly;
+			}
+			continue;
+		}
+
+		// 3. Price-only line (e.g. "$7.99") — completes the pending item
+		const priceOnly = isJustPrice(trimmed);
+		if (priceOnly !== null) {
+			if (pending !== null) {
+				pending.lineTotal = priceOnly;
+				flushPending();
+			}
+			continue;
+		}
+
+		// 4. Name-only line — append to name if pending has no price yet, otherwise start fresh
+		const nameResult = isNameWithoutPrice(line);
+		if (nameResult !== null) {
+			if (qtyStash !== null || pending === null) {
+				// A stashed qty signals a new item block, or there's simply no pending item
+				flushPending();
+				pending = { name: nameResult.name, quantity: qtyStash ?? nameResult.quantity, unitPrice: null, lineTotal: null };
+				qtyStash = null;
+			} else {
+				// Pending item exists but has no price yet — this is a continuation of the name
+				pending.name += ' ' + nameResult.name;
+			}
+			console.log('[Parser] Item name now:', pending.name);
+			continue;
+		}
+
+		// 5. Unrecognized line — leave pending intact to tolerate noise between name and price
 	}
 
+	flushPending();
 	console.log('[Parser] Parsed', items.length, 'items, tax:', taxAmount, 'subtotal:', subtotal, 'total:', total, 'tip:', tipAmount);
 
 	return { items, taxAmount, subtotal, total, tipAmount };

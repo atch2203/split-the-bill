@@ -71,7 +71,7 @@
 	}
 
 	// Preset tip percentages
-	const tipPresets = [15, 18, 20, 25];
+	const tipPresets = [0, 10, 15, 18, 20];
 </script>
 
 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
