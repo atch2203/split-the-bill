@@ -32,7 +32,7 @@
 	}
 
 	// Generate text summary for clipboard
-	function generateTextSummary(): string {
+	function generateTextSummary(withAssignments: boolean): string {
 		const lines: string[] = [];
 
 		lines.push('=== Split the Bill Summary ===');
@@ -50,17 +50,25 @@
 		lines.push(`Total: ${formatPrice(billTotal)}`);
 		lines.push('');
 
-		// Per-person breakdown with items
+		// Per-person amounts
 		if (syncedBillStore.personTotals.length > 0) {
 			lines.push('Each Person Owes:');
 			for (const total of syncedBillStore.personTotals) {
-				const personItems = getPersonItems(total.personId);
-				const itemNames = personItems.map(item => {
-					const qtyStr = item.quantity > 1 ? ` x${item.quantity}` : '';
-					return `${item.name}${qtyStr}`;
-				}).join(', ');
-				const itemsStr = itemNames ? ` (${itemNames})` : '';
-				lines.push(`  ${total.personName}: ${formatPrice(total.grandTotal)}${itemsStr}`);
+				lines.push(`  ${total.personName}: ${formatPrice(total.grandTotal)}`);
+			}
+			if (withAssignments) {
+				lines.push('');
+
+				// Per-person item assignments
+				lines.push('Item Assignments:');
+				for (const total of syncedBillStore.personTotals) {
+					const personItems = getPersonItems(total.personId);
+					const itemNames = personItems.map(item => {
+						const qtyStr = item.quantity > 1 ? ` x${item.quantity}` : '';
+						return `${item.name}${qtyStr}`;
+					}).join(', ');
+					lines.push(`  ${total.personName}: ${itemNames || '(none)'}`);
+				}
 			}
 		}
 
@@ -78,9 +86,9 @@
 		return JSON.stringify(data, null, 2);
 	}
 
-	async function exportToClipboard() {
+	async function exportToClipboard(withAssignments: boolean) {
 		try {
-			const text = generateTextSummary();
+			const text = generateTextSummary(withAssignments);
 			await navigator.clipboard.writeText(text);
 			exportMessage = 'Summary copied to clipboard!';
 			isError = false;
@@ -258,13 +266,22 @@
 		</button>
 
 		<button
-			onclick={exportToClipboard}
+			onclick={() => exportToClipboard(false)}
 			class="flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600"
 		>
 			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
 			</svg>
 			Copy Summary
+		</button>
+		<button
+			onclick={() => exportToClipboard(true)}
+			class="flex items-center gap-1.5 rounded-lg bg-blue-400 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+		>
+			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+			</svg>
+			Copy with Assignments
 		</button>
 
 		<button
