@@ -34,6 +34,21 @@ const grandTotal = $derived(subtotal + settings.taxAmount + effectiveTipAmount -
 
 const unassignedItems = $derived(items.filter((item) => item.assignedTo.length === 0));
 
+function getItemShare(item: ReceiptItem, personId: string): number {
+	if (!item.assignedTo.includes(personId)) return 0;
+	const itemTotal = item.price * item.quantity;
+	if (item.isMultipart && item.portions) {
+		const totalPortions = item.assignedTo.reduce(
+			(sum, id) => sum + (item.portions?.[id] ?? 1),
+			0
+		);
+		if (totalPortions <= 0) return 0;
+		const personPortion = item.portions[personId] ?? 1;
+		return itemTotal * (personPortion / totalPortions);
+	}
+	return itemTotal / item.assignedTo.length;
+}
+
 const personTotals = $derived.by(() => {
 	const totals: PersonTotal[] = [];
 
@@ -41,11 +56,7 @@ const personTotals = $derived.by(() => {
 		// Calculate this person's share of items
 		let itemsTotal = 0;
 		for (const item of items) {
-			if (item.assignedTo.includes(person.id)) {
-				// Split item cost among all assigned people
-				const splitAmount = (item.price * item.quantity) / item.assignedTo.length;
-				itemsTotal += splitAmount;
-			}
+			itemsTotal += getItemShare(item, person.id);
 		}
 
 		// Calculate proportional shares
@@ -81,7 +92,9 @@ function addItem(name: string = 'New Item', price: number = 0, quantity: number 
 		name,
 		price,
 		quantity,
-		assignedTo: []
+		assignedTo: [],
+		isMultipart: false,
+		portions: {}
 	};
 	items.push(newItem);
 	notifyStateChange();
@@ -145,9 +158,42 @@ function toggleAssignment(itemId: string, personId: string): void {
 	const index = item.assignedTo.indexOf(personId);
 	if (index === -1) {
 		item.assignedTo.push(personId);
+		if (item.isMultipart) {
+			if (!item.portions) item.portions = {};
+			item.portions[personId] = 1;
+		}
 	} else {
 		item.assignedTo.splice(index, 1);
+		if (item.portions && personId in item.portions) {
+			delete item.portions[personId];
+		}
 	}
+	notifyStateChange();
+}
+
+function toggleMultipart(itemId: string): void {
+	const item = items.find((item) => item.id === itemId);
+	if (!item) return;
+	if (item.isMultipart) {
+		item.isMultipart = false;
+		item.portions = {};
+	} else {
+		item.isMultipart = true;
+		const portions: Record<string, number> = {};
+		for (const personId of item.assignedTo) {
+			portions[personId] = item.portions?.[personId] ?? 1;
+		}
+		item.portions = portions;
+	}
+	notifyStateChange();
+}
+
+function setPortion(itemId: string, personId: string, portion: number): void {
+	const item = items.find((item) => item.id === itemId);
+	if (!item || !item.isMultipart) return;
+	if (!item.assignedTo.includes(personId)) return;
+	if (!item.portions) item.portions = {};
+	item.portions[personId] = Math.max(1, Math.floor(portion));
 	notifyStateChange();
 }
 
@@ -242,6 +288,8 @@ export const billStore = {
 	addPerson,
 	removePerson,
 	toggleAssignment,
+	toggleMultipart,
+	setPortion,
 	updateSettings,
 	setRawOcrText,
 	resetAll,

@@ -4,6 +4,8 @@ export interface ReceiptItem {
 	price: number;
 	quantity: number;
 	assignedTo: string[]; // Person IDs
+	isMultipart?: boolean; // When true, split by portions instead of equal shares
+	portions?: Record<string, number>; // Person ID -> portion count (only used when isMultipart)
 }
 
 export interface Person {

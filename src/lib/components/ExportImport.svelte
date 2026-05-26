@@ -20,7 +20,18 @@
 		const items: { name: string; quantity: number; share: number }[] = [];
 		for (const item of syncedBillStore.items) {
 			if (item.assignedTo.includes(personId)) {
-				const shareAmount = (item.price * item.quantity) / item.assignedTo.length;
+				const itemTotal = item.price * item.quantity;
+				let shareAmount: number;
+				if (item.isMultipart && item.portions) {
+					const totalPortions = item.assignedTo.reduce(
+						(sum, id) => sum + (item.portions?.[id] ?? 1),
+						0
+					);
+					const personPortion = item.portions[personId] ?? 1;
+					shareAmount = totalPortions > 0 ? itemTotal * (personPortion / totalPortions) : 0;
+				} else {
+					shareAmount = itemTotal / item.assignedTo.length;
+				}
 				items.push({
 					name: item.name,
 					quantity: item.quantity,

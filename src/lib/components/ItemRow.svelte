@@ -84,6 +84,21 @@
 			select.value = '';
 		}
 	}
+
+	function getPortion(personId: string): number {
+		return item.portions?.[personId] ?? 1;
+	}
+
+	function incrementPortion(personId: string) {
+		syncedBillStore.setPortion(item.id, personId, getPortion(personId) + 1);
+	}
+
+	function decrementPortion(personId: string) {
+		const current = getPortion(personId);
+		if (current > 1) {
+			syncedBillStore.setPortion(item.id, personId, current - 1);
+		}
+	}
 </script>
 
 <div
@@ -154,23 +169,62 @@
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
 						</svg>
 					</button>
+					<button
+						onclick={() => syncedBillStore.toggleMultipart(item.id)}
+						class="rounded p-1 transition-colors {item.isMultipart
+							? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+							: 'text-gray-400 hover:bg-purple-100 hover:text-purple-600'}"
+						title={item.isMultipart ? 'Switch to equal split' : 'Switch to portion-based split'}
+					>
+						<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+						</svg>
+					</button>
 				</div>
 
 				<!-- Assigned People -->
 				{#if assignedPeople.length > 0}
 					<div class="mt-1.5 flex flex-wrap gap-1">
 						{#each assignedPeople as person (person.id)}
-							<span
-								class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
-								style="background-color: {person.color}40; border: 1px solid {person.color};"
-							>
-								{person.name}
-								<button
-									onclick={() => syncedBillStore.toggleAssignment(item.id, person.id)}
-									class="ml-0.5 leading-none opacity-60 transition-opacity hover:opacity-100"
-									title="Remove {person.name}"
-								>&times;</button>
-							</span>
+							{#if item.isMultipart}
+								<span
+									class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+									style="background-color: {person.color}40; border: 1px solid {person.color};"
+								>
+									<span>{person.name}</span>
+									<button
+										onclick={() => decrementPortion(person.id)}
+										disabled={getPortion(person.id) <= 1}
+										class="ml-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm leading-none transition-colors hover:bg-gray-100 disabled:opacity-40"
+										title="Decrease portion"
+										aria-label="Decrease {person.name}'s portion"
+									>&minus;</button>
+									<span class="min-w-4 text-center font-semibold tabular-nums">{getPortion(person.id)}</span>
+									<button
+										onclick={() => incrementPortion(person.id)}
+										class="flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm leading-none transition-colors hover:bg-gray-100"
+										title="Increase portion"
+										aria-label="Increase {person.name}'s portion"
+									>+</button>
+									<button
+										onclick={() => syncedBillStore.toggleAssignment(item.id, person.id)}
+										class="ml-0.5 leading-none opacity-60 transition-opacity hover:opacity-100"
+										title="Remove {person.name}"
+									>&times;</button>
+								</span>
+							{:else}
+								<span
+									class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+									style="background-color: {person.color}40; border: 1px solid {person.color};"
+								>
+									{person.name}
+									<button
+										onclick={() => syncedBillStore.toggleAssignment(item.id, person.id)}
+										class="ml-0.5 leading-none opacity-60 transition-opacity hover:opacity-100"
+										title="Remove {person.name}"
+									>&times;</button>
+								</span>
+							{/if}
 						{/each}
 					</div>
 				{/if}

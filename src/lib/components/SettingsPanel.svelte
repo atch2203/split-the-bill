@@ -1,6 +1,18 @@
 <script lang="ts">
 	import { syncedBillStore } from '$lib/stores/syncedBillStore.svelte';
+	import { peerStore } from '$lib/stores/peerStore.svelte';
 	import { parsePrice, formatPrice } from '$lib/utils/receiptParser';
+
+	let isCollapsed = $state(peerStore.isGuest);
+	let prevIsGuest = peerStore.isGuest;
+
+	// Auto-collapse when guest status changes (e.g., guest connects after mount)
+	$effect(() => {
+		if (peerStore.isGuest !== prevIsGuest) {
+			prevIsGuest = peerStore.isGuest;
+			isCollapsed = peerStore.isGuest;
+		}
+	});
 
 	let taxInput = $state(syncedBillStore.settings.taxAmount > 0 ? syncedBillStore.settings.taxAmount.toFixed(2) : '');
 	let tipPercentInput = $state(syncedBillStore.settings.tipPercent.toString());
@@ -75,8 +87,22 @@
 </script>
 
 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-	<h2 class="mb-3 text-lg font-semibold text-gray-800">Settings</h2>
+	<button
+		onclick={() => (isCollapsed = !isCollapsed)}
+		class="flex w-full items-center justify-between {isCollapsed ? '' : 'mb-3'} text-left"
+	>
+		<h2 class="text-lg font-semibold text-gray-800">Settings</h2>
+		<svg
+			class="h-5 w-5 text-gray-500 transition-transform {isCollapsed ? '' : 'rotate-180'}"
+			fill="none"
+			stroke="currentColor"
+			viewBox="0 0 24 24"
+		>
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+		</svg>
+	</button>
 
+	{#if !isCollapsed}
 	<div class="space-y-4">
 		<!-- Tax -->
 		<div>
@@ -195,4 +221,5 @@
 			{/if}
 		</div>
 	</div>
+	{/if}
 </div>

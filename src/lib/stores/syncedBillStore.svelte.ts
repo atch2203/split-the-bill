@@ -40,6 +40,8 @@ export const syncedBillStore = {
 	addPerson: createSyncedAction('addPerson', billStore.addPerson),
 	removePerson: createSyncedAction('removePerson', billStore.removePerson),
 	toggleAssignment: createSyncedAction('toggleAssignment', billStore.toggleAssignment),
+	toggleMultipart: createSyncedAction('toggleMultipart', billStore.toggleMultipart),
+	setPortion: createSyncedAction('setPortion', billStore.setPortion),
 	updateSettings: createSyncedAction('updateSettings', billStore.updateSettings) as (updates: Partial<BillSettings>) => void,
 
 	// Host-only actions (not synced to guests)
