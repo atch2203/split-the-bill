@@ -1,5 +1,5 @@
 import Peer, { type DataConnection } from 'peerjs';
-import type { ReceiptItem, Person, BillSettings } from '$lib/types';
+import type { ReceiptItem, Person, BillSettings, PaymentMethod } from '$lib/types';
 
 // Message types for peer communication
 type SyncMessage = {
@@ -9,6 +9,7 @@ type SyncMessage = {
 		people: Person[];
 		settings: BillSettings;
 		colorIndex: number;
+		paymentMethods?: PaymentMethod[];
 	};
 };
 

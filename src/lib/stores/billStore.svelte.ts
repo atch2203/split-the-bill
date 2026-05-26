@@ -1,4 +1,4 @@
-import type { ReceiptItem, Person, BillSettings, PersonTotal } from '$lib/types';
+import type { ReceiptItem, Person, BillSettings, PersonTotal, PaymentMethod } from '$lib/types';
 import { PERSON_COLORS } from '$lib/types';
 
 // Generate unique IDs
@@ -16,10 +16,12 @@ let settings = $state<BillSettings>({
 	taxAmount: 0,
 	tipPercent: 18,
 	tipAmount: 0,
-	cashBackPercent: 0
+	cashBackPercent: 0,
+	title: ''
 });
 let rawOcrText = $state<string>('');
 let colorIndex = $state<number>(0);
+let paymentMethods = $state<PaymentMethod[]>([]);
 
 // Derived values
 const subtotal = $derived(items.reduce((sum, item) => sum + item.price * item.quantity, 0));
@@ -202,6 +204,29 @@ function updateSettings(updates: Partial<BillSettings>): void {
 	notifyStateChange();
 }
 
+function addPaymentMethod(label: string = '', value: string = ''): PaymentMethod {
+	const pm: PaymentMethod = { id: generateId(), label, value };
+	paymentMethods.push(pm);
+	notifyStateChange();
+	return pm;
+}
+
+function removePaymentMethod(id: string): void {
+	const idx = paymentMethods.findIndex((p) => p.id === id);
+	if (idx !== -1) {
+		paymentMethods.splice(idx, 1);
+		notifyStateChange();
+	}
+}
+
+function updatePaymentMethod(id: string, updates: Partial<Omit<PaymentMethod, 'id'>>): void {
+	const pm = paymentMethods.find((p) => p.id === id);
+	if (pm) {
+		Object.assign(pm, updates);
+		notifyStateChange();
+	}
+}
+
 function setRawOcrText(text: string): void {
 	rawOcrText = text;
 }
@@ -213,8 +238,10 @@ function resetAll(): void {
 	settings.tipPercent = 18;
 	settings.tipAmount = 0;
 	settings.cashBackPercent = 0;
+	settings.title = '';
 	rawOcrText = '';
 	colorIndex = 0;
+	paymentMethods.length = 0;
 	notifyStateChange();
 }
 
@@ -224,7 +251,8 @@ function getState() {
 		items: JSON.parse(JSON.stringify(items)),
 		people: JSON.parse(JSON.stringify(people)),
 		settings: JSON.parse(JSON.stringify(settings)),
-		colorIndex
+		colorIndex,
+		paymentMethods: JSON.parse(JSON.stringify(paymentMethods))
 	};
 }
 
@@ -233,6 +261,7 @@ function setState(state: {
 	people: Person[];
 	settings: BillSettings;
 	colorIndex: number;
+	paymentMethods?: PaymentMethod[];
 }): void {
 	items.length = 0;
 	items.push(...state.items);
@@ -240,6 +269,8 @@ function setState(state: {
 	people.push(...state.people);
 	Object.assign(settings, state.settings);
 	colorIndex = state.colorIndex;
+	paymentMethods.length = 0;
+	if (state.paymentMethods) paymentMethods.push(...state.paymentMethods);
 }
 
 function setOnStateChange(callback: (() => void) | null): void {
@@ -279,6 +310,9 @@ export const billStore = {
 	get personTotals() {
 		return personTotals;
 	},
+	get paymentMethods() {
+		return paymentMethods;
+	},
 
 	// Actions
 	addItem,
@@ -291,6 +325,9 @@ export const billStore = {
 	toggleMultipart,
 	setPortion,
 	updateSettings,
+	addPaymentMethod,
+	removePaymentMethod,
+	updatePaymentMethod,
 	setRawOcrText,
 	resetAll,
 

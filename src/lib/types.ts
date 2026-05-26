@@ -19,6 +19,13 @@ export interface BillSettings {
 	tipPercent: number; // User input (0-100)
 	tipAmount: number; // Derived from percent or manual override
 	cashBackPercent: number; // User input (0-100), applied to subtotal
+	title?: string; // Optional bill title (e.g., "Dinner at Chipotle")
+}
+
+export interface PaymentMethod {
+	id: string;
+	label: string; // e.g., "Zelle", "Venmo"
+	value: string; // e.g., "111-111-1111", "@test"
 }
 
 export interface PersonTotal {

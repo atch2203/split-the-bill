@@ -102,6 +102,7 @@
 </script>
 
 <div
+	data-item-id={item.id}
 	class="rounded-lg border p-3 transition-colors {isUnassigned
 		? 'border-yellow-300 bg-yellow-50'
 		: 'border-gray-200 bg-white'}"
@@ -109,32 +110,41 @@
 	{#if isEditing}
 		<!-- Edit Mode -->
 		<div class="space-y-2">
-			<div class="flex gap-2">
-				<input
-					bind:value={editName}
-					type="text"
-					placeholder="Item name"
-					class="flex-1 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
-					onkeydown={handleKeydown}
-				/>
-				<input
-					value={editQuantity}
-					oninput={handleQuantityChange}
-					type="number"
-					min="1"
-					placeholder="Qty"
-					class="w-16 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
-					onkeydown={handleKeydown}
-					title="Changing quantity adjusts price to keep total the same"
-				/>
-				<input
-					bind:value={editPrice}
-					type="text"
-					inputmode="decimal"
-					placeholder="Price"
-					class="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
-					onkeydown={handleKeydown}
-				/>
+			<div class="flex flex-wrap gap-2">
+				<label class="flex w-full min-w-0 flex-1 basis-full flex-col gap-0.5 sm:basis-0">
+					<span class="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Name</span>
+					<input
+						bind:value={editName}
+						type="text"
+						placeholder="Item name"
+						class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+						onkeydown={handleKeydown}
+					/>
+				</label>
+				<label class="flex w-20 min-w-0 flex-1 flex-col gap-0.5 sm:w-16 sm:flex-initial">
+					<span class="text-[10px] font-semibold uppercase tracking-wide text-gray-500" title="Quantity">Quantity</span>
+					<input
+						value={editQuantity}
+						oninput={handleQuantityChange}
+						type="number"
+						min="1"
+						placeholder="1"
+						class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+						onkeydown={handleKeydown}
+						title="Changing quantity adjusts price to keep total the same"
+					/>
+				</label>
+				<label class="flex w-24 min-w-0 flex-1 flex-col gap-0.5 sm:flex-initial">
+					<span class="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Price ($)</span>
+					<input
+						bind:value={editPrice}
+						type="text"
+						inputmode="decimal"
+						placeholder="0.00"
+						class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+						onkeydown={handleKeydown}
+					/>
+				</label>
 			</div>
 			<div class="flex justify-end gap-2">
 				<button

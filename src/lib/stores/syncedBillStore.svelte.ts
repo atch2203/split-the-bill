@@ -1,6 +1,6 @@
 import { billStore } from './billStore.svelte';
 import { peerStore } from './peerStore.svelte';
-import type { ReceiptItem, BillSettings } from '$lib/types';
+import type { ReceiptItem, BillSettings, PaymentMethod } from '$lib/types';
 
 // Create proxied actions that route to host when connected as guest
 function createSyncedAction<T extends unknown[], R>(
@@ -31,6 +31,7 @@ export const syncedBillStore = {
 	get grandTotal() { return billStore.grandTotal; },
 	get unassignedItems() { return billStore.unassignedItems; },
 	get personTotals() { return billStore.personTotals; },
+	get paymentMethods() { return billStore.paymentMethods; },
 
 	// Synced actions - these route through peer when connected as guest
 	addItem: createSyncedAction('addItem', billStore.addItem) as (name?: string, price?: number, quantity?: number) => ReceiptItem | undefined,
@@ -43,6 +44,9 @@ export const syncedBillStore = {
 	toggleMultipart: createSyncedAction('toggleMultipart', billStore.toggleMultipart),
 	setPortion: createSyncedAction('setPortion', billStore.setPortion),
 	updateSettings: createSyncedAction('updateSettings', billStore.updateSettings) as (updates: Partial<BillSettings>) => void,
+	addPaymentMethod: createSyncedAction('addPaymentMethod', billStore.addPaymentMethod) as (label?: string, value?: string) => PaymentMethod | undefined,
+	removePaymentMethod: createSyncedAction('removePaymentMethod', billStore.removePaymentMethod),
+	updatePaymentMethod: createSyncedAction('updatePaymentMethod', billStore.updatePaymentMethod) as (id: string, updates: Partial<Omit<PaymentMethod, 'id'>>) => void,
 
 	// Host-only actions (not synced to guests)
 	setRawOcrText: billStore.setRawOcrText,
