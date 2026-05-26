@@ -20,6 +20,10 @@ export interface BillSettings {
 	tipAmount: number; // Derived from percent or manual override
 	cashBackPercent: number; // User input (0-100), applied to subtotal
 	title?: string; // Optional bill title (e.g., "Dinner at Chipotle")
+	// Guest permissions — default true (allow). Host toggles these to restrict.
+	guestsCanAddItems?: boolean;
+	guestsCanEditItems?: boolean;
+	guestsCanEditSettings?: boolean;
 }
 
 export interface PaymentMethod {

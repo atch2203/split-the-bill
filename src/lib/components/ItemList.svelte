@@ -6,17 +6,22 @@
 	import { formatPrice } from '$lib/utils/receiptParser';
 
 	const showGuestDemoItem = $derived(peerStore.isGuest && identityStore.tourActive);
+	const canAddItem = $derived(
+		!peerStore.isGuest || syncedBillStore.settings.guestsCanAddItems !== false
+	);
 </script>
 
 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
 	<div class="mb-3 flex items-center justify-between">
 		<h2 class="text-lg font-semibold text-gray-800">Items</h2>
-		<button
-			onclick={() => syncedBillStore.addItem()}
-			class="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-600"
-		>
-			+ Add Item
-		</button>
+		{#if canAddItem}
+			<button
+				onclick={() => syncedBillStore.addItem()}
+				class="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-600"
+			>
+				+ Add Item
+			</button>
+		{/if}
 	</div>
 
 	<div class="space-y-2">
@@ -42,8 +47,18 @@
 								</svg>
 							</span>
 						</div>
+						<!-- Sample assignee (the "you" demo person) -->
+						<div class="mt-1.5 flex flex-wrap gap-1">
+							<span
+								class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+								style="background-color: #818cf840; border: 1px solid #818cf8;"
+							>
+								You (sample)
+								<span class="ml-0.5 leading-none opacity-60">&times;</span>
+							</span>
+						</div>
 						<div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-							<span class="rounded-full border border-blue-300 bg-blue-100 px-3 py-0.5 text-xs font-medium text-blue-700">+ Me</span>
+							<span class="rounded-full border border-green-300 bg-green-100 px-3 py-0.5 text-xs font-medium text-green-800">✓ Me</span>
 							<span class="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600">+ Other ▾</span>
 						</div>
 					</div>

@@ -8,6 +8,8 @@ function generateId(): string {
 
 // Callback for notifying peer store of state changes
 let onStateChange: (() => void) | null = null;
+// When true, mutations skip broadcasting (e.g., local-only tour sample data)
+let notificationsPaused = false;
 
 // Reactive state using Svelte 5 runes
 let items = $state<ReceiptItem[]>([]);
@@ -17,7 +19,10 @@ let settings = $state<BillSettings>({
 	tipPercent: 18,
 	tipAmount: 0,
 	cashBackPercent: 0,
-	title: ''
+	title: '',
+	guestsCanAddItems: true,
+	guestsCanEditItems: true,
+	guestsCanEditSettings: true
 });
 let rawOcrText = $state<string>('');
 let colorIndex = $state<number>(0);
@@ -83,9 +88,19 @@ const personTotals = $derived.by(() => {
 
 // Actions
 function notifyStateChange(): void {
+	if (notificationsPaused) return;
 	if (onStateChange) {
 		onStateChange();
 	}
+}
+
+function pauseNotifications(): void {
+	notificationsPaused = true;
+}
+
+function resumeNotifications(emit: boolean = true): void {
+	notificationsPaused = false;
+	if (emit && onStateChange) onStateChange();
 }
 
 function addItem(name: string = 'New Item', price: number = 0, quantity: number = 1): ReceiptItem {
@@ -239,6 +254,9 @@ function resetAll(): void {
 	settings.tipAmount = 0;
 	settings.cashBackPercent = 0;
 	settings.title = '';
+	settings.guestsCanAddItems = true;
+	settings.guestsCanEditItems = true;
+	settings.guestsCanEditSettings = true;
 	rawOcrText = '';
 	colorIndex = 0;
 	paymentMethods.length = 0;
@@ -334,5 +352,7 @@ export const billStore = {
 	// Peer sync functions
 	getState,
 	setState,
-	setOnStateChange
+	setOnStateChange,
+	pauseNotifications,
+	resumeNotifications
 };

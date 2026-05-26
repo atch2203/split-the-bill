@@ -16,7 +16,8 @@
 
 	function commit() {
 		const next = titleInput.trim();
-		if (next === (syncedBillStore.settings.title ?? '')) return;
+		const current = (syncedBillStore.settings.title ?? '').trim();
+		if (next === current) return;
 		prevStoreTitle = next;
 		syncedBillStore.updateSettings({ title: next });
 	}

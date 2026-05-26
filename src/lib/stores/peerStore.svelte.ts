@@ -48,6 +48,12 @@ let peerId = $state<string | null>(null);
 let isHost = $state<boolean>(false);
 let isConnected = $state<boolean>(false);
 let connections = $state<DataConnection[]>([]);
+// True while a guest join is in flight (between joinHost call and success/error).
+// Used by UI to show a loading screen instead of the standalone/host main UI.
+let isJoining = $state<boolean>(false);
+// Authenticated connections — explicit per-conn flag rather than array search.
+// Adds robustness if `connections` reactive state ever lags an action message.
+const authenticatedConns = new WeakSet<DataConnection>();
 let hostConnection = $state<DataConnection | null>(null);
 let error = $state<string | null>(null);
 let totalUsers = $state<number>(1); // Total users in session (for guests to display)
@@ -68,6 +74,9 @@ let isReconnecting = $state<boolean>(false); // Currently attempting to reconnec
 let onStateSync: ((state: SyncMessage['payload']) => void) | null = null;
 let onAction: ((action: string, args: unknown[]) => void) | null = null;
 let getState: (() => SyncMessage['payload']) | null = null;
+// Optional filter applied to outgoing broadcast state. Used by the tour to strip
+// host-local sample data from anything sent to guests.
+let stateFilter: ((s: SyncMessage['payload']) => SyncMessage['payload']) | null = null;
 
 function generateRoomId(): string {
 	return Math.random().toString(36).substring(2, 8);
@@ -157,17 +166,23 @@ async function startHost(passcode: string = '', existingId?: string): Promise<st
 		});
 
 		conn.on('data', (data) => {
+			// Defensive: validate message shape before trusting any field.
+			if (!data || typeof data !== 'object') return;
 			const message = data as PeerMessage;
+			if (typeof (message as { type?: unknown }).type !== 'string') return;
 
 			if (message.type === 'authResponse') {
+				if (typeof message.passcode !== 'string') return;
 				// Validate passcode
 				if (!hostPasscode || message.passcode === hostPasscode) {
-					// Auth successful - add to connections and send state
+					// Auth successful - record per-conn auth + add to connections + send state
+					authenticatedConns.add(conn);
 					connections = [...connections, conn];
 					conn.send({ type: 'authResult', success: true } as AuthResultMessage);
 
 					if (getState) {
-						const state = getState();
+						const raw = getState();
+						const state = stateFilter ? stateFilter(raw) : raw;
 						conn.send({ type: 'sync', payload: state } as SyncMessage);
 					}
 					conn.send({ type: 'peerCount', count: connections.length + 1 } as PeerCountMessage);
@@ -179,12 +194,19 @@ async function startHost(passcode: string = '', existingId?: string): Promise<st
 					conn.close();
 				}
 			} else if (message.type === 'action' && onAction) {
-				// Execute action from guest
+				// Reject any action from an unauthenticated peer.
+				if (!authenticatedConns.has(conn)) return;
+				if (typeof message.action !== 'string') return;
+				if (!Array.isArray(message.args)) return;
+				if (message.action.length > 64) return;
+				// Cap payload size to avoid OOM / DoS via giant arg arrays.
+				if (message.args.length > 16) return;
 				onAction(message.action, message.args);
 			}
 		});
 
 		conn.on('close', () => {
+			authenticatedConns.delete(conn);
 			connections = connections.filter(c => c !== conn);
 			broadcastPeerCount();
 			if (connections.length === 0) {
@@ -207,6 +229,7 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 	awaitingPasscode = false;
 	canReconnect = false;
 	isReconnecting = false;
+	isJoining = true;
 
 	// Save for reconnection
 	lastHostId = hostId;
@@ -259,11 +282,13 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 					pendingConnection = null;
 					awaitingPasscode = false;
 					isConnected = true;
+					isJoining = false;
 					resolve();
 				} else {
 					error = message.error || 'Authentication failed';
 					awaitingPasscode = false;
 					pendingConnection = null;
+					isJoining = false;
 					reject(new Error(message.error || 'Authentication failed'));
 				}
 			} else if (message.type === 'sync' && onStateSync) {
@@ -277,6 +302,7 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 			hostConnection = null;
 			pendingConnection = null;
 			isConnected = false;
+			isJoining = false;
 			if (!error) {
 				error = 'Disconnected from host';
 			}
@@ -288,12 +314,14 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 
 		conn.on('error', (err) => {
 			error = err.message;
+			isJoining = false;
 			reject(err);
 		});
 
 		// Timeout after 30 seconds (longer to allow passcode entry)
 		setTimeout(() => {
 			if (!isConnected && !awaitingPasscode) {
+				isJoining = false;
 				reject(new Error('Connection timeout'));
 			}
 		}, 30000);
@@ -343,7 +371,8 @@ function clearReconnect(): void {
 function broadcastState(): void {
 	if (!isHost || !getState) return;
 
-	const state = getState();
+	const raw = getState();
+	const state = stateFilter ? stateFilter(raw) : raw;
 	const message: SyncMessage = { type: 'sync', payload: state };
 
 	for (const conn of connections) {
@@ -351,6 +380,10 @@ function broadcastState(): void {
 			conn.send(message);
 		}
 	}
+}
+
+function setStateFilter(fn: ((s: SyncMessage['payload']) => SyncMessage['payload']) | null): void {
+	stateFilter = fn;
 }
 
 // Host: broadcast peer count to all guests
@@ -391,6 +424,7 @@ function disconnect(): void {
 	totalUsers = 1;
 	hostPasscode = '';
 	awaitingPasscode = false;
+	isJoining = false;
 	// Clear reconnection state on intentional disconnect
 	clearReconnect();
 }
@@ -445,6 +479,7 @@ export const peerStore = {
 	get hasPasscode() { return !!hostPasscode; },
 	get canReconnect() { return canReconnect; },
 	get isReconnecting() { return isReconnecting; },
+	get isJoining() { return isJoining; },
 	get wasHost() { return wasHost; },
 
 	startHost,
@@ -457,5 +492,6 @@ export const peerStore = {
 	disconnect,
 	getShareUrl,
 	getRoomFromUrl,
-	registerCallbacks
+	registerCallbacks,
+	setStateFilter
 };

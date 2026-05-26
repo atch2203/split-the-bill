@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { peerStore } from '$lib/stores/peerStore.svelte';
 	import { syncedBillStore } from '$lib/stores/syncedBillStore.svelte';
+	import { billStore } from '$lib/stores/billStore.svelte';
 	import { identityStore } from '$lib/stores/identityStore.svelte';
 
 	type Step = {
@@ -96,6 +97,16 @@
 
 	const LABEL_HEIGHT = 110;
 
+	function firstVisible(els: NodeListOf<Element> | Element[]): Element | null {
+		// Prefer an element with non-zero layout box (filters hidden duplicates,
+		// e.g., a desktop-only header version coexisting with a mobile one).
+		for (const el of els) {
+			const r = el.getBoundingClientRect();
+			if (r.width > 0 && r.height > 0) return el;
+		}
+		return els[0] ?? null;
+	}
+
 	function resolveElement(step: Step): Element | null {
 		if (step.selector === '[data-tour="test-item"]') {
 			if (testItemId) {
@@ -105,9 +116,9 @@
 			// Guest tour: ItemList renders a static demo row tagged with this id
 			const demoRow = document.querySelector('[data-item-id="tour-demo"]');
 			if (demoRow) return demoRow;
-			return document.querySelector('[data-tour="items"]');
+			return firstVisible(document.querySelectorAll('[data-tour="items"]'));
 		}
-		return document.querySelector(step.selector);
+		return firstVisible(document.querySelectorAll(step.selector));
 	}
 
 	function measure() {
@@ -138,23 +149,41 @@
 	let prevIdentityId: string | null = null;
 	let swappedIdentity = false;
 
+	let pausedHostBroadcast = false;
+
 	onMount(() => {
 		identityStore.setTourActive(true);
 		// Host only: add a sample person + item + payment methods so users can see all parts
 		// of the UI. Also temporarily set identity to the test person so the summary
 		// self-highlight + "Your items" demo renders. Guests can't mutate state, so skip.
 		if (!peerStore.isGuest) {
-			const person = syncedBillStore.addPerson('Sample person (tour)');
+			// Install a broadcast filter so any state sent to guests has tour-only sample
+			// data stripped. Then pause local mutation broadcasts so the tour-init churn
+			// doesn't flood guests (they're all no-ops after filtering anyway, but
+			// pausing keeps the wire quiet). Guest actions during the tour bypass the
+			// pause via an explicit broadcast in ShareButton's onAction handler.
+			peerStore.setStateFilter((s) => ({
+				...s,
+				items: s.items.filter((i) => i.id !== testItemId),
+				people: s.people.filter((p) => p.id !== testPersonId),
+				paymentMethods: (s.paymentMethods ?? []).filter(
+					(pm) => !testPaymentMethodIds.includes(pm.id)
+				)
+			}));
+			billStore.pauseNotifications();
+			pausedHostBroadcast = true;
+
+			const person = billStore.addPerson('Sample person (tour)');
 			testPersonId = person?.id ?? null;
-			const item = syncedBillStore.addItem('Sample burger (tour)', 12.5, 1);
+			const item = billStore.addItem('Sample burger (tour)', 12.5, 1);
 			testItemId = item?.id ?? null;
 			if (testItemId && testPersonId) {
-				syncedBillStore.toggleAssignment(testItemId, testPersonId);
+				billStore.toggleAssignment(testItemId, testPersonId);
 			}
 
-			const venmo = syncedBillStore.addPaymentMethod('Venmo', '@sample-handle');
+			const venmo = billStore.addPaymentMethod('Venmo', '@sample-handle');
 			if (venmo) testPaymentMethodIds.push(venmo.id);
-			const zelle = syncedBillStore.addPaymentMethod('Zelle', '555-555-1234');
+			const zelle = billStore.addPaymentMethod('Zelle', '555-555-1234');
 			if (zelle) testPaymentMethodIds.push(zelle.id);
 
 			// Swap identity to sample person so summary self-highlight + payment buttons demo render
@@ -192,16 +221,25 @@
 				swappedIdentity = false;
 			}
 			for (const pmId of testPaymentMethodIds) {
-				syncedBillStore.removePaymentMethod(pmId);
+				billStore.removePaymentMethod(pmId);
 			}
 			testPaymentMethodIds = [];
 			if (testItemId) {
-				syncedBillStore.removeItem(testItemId);
+				billStore.removeItem(testItemId);
 				testItemId = null;
 			}
 			if (testPersonId) {
-				syncedBillStore.removePerson(testPersonId);
+				billStore.removePerson(testPersonId);
 				testPersonId = null;
+			}
+			// Resume broadcasts and clear the filter, then emit a single sync so guests get
+			// the post-cleanup state (matches pre-tour state — tour data was removed).
+			if (pausedHostBroadcast) {
+				peerStore.setStateFilter(null);
+				billStore.resumeNotifications(true);
+				pausedHostBroadcast = false;
+			} else {
+				peerStore.setStateFilter(null);
 			}
 		};
 	});

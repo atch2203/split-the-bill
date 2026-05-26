@@ -57,7 +57,38 @@
 	<!-- Main Content -->
 	<main class="mx-auto max-w-2xl space-y-4 px-4 py-4">
 		<ShareLinkBanner />
-		<BillTitle />
+		{#if peerStore.isJoining}
+			<div class="rounded-lg border border-blue-200 bg-blue-50 p-6 text-center shadow-sm">
+				{#if peerStore.awaitingPasscode}
+					<svg
+						class="mx-auto mb-3 h-6 w-6 text-blue-500"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M12 11c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2-2-.895-2-2zm-6 7a6 6 0 1112 0H6z"
+						/>
+					</svg>
+					<p class="font-semibold text-gray-800">Enter the passcode to join</p>
+					<p class="mt-1 text-sm text-gray-600">Use the passcode field in the header.</p>
+				{:else}
+					<svg class="mx-auto mb-3 h-6 w-6 animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
+						<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25" />
+						<path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75" />
+					</svg>
+					<p class="font-semibold text-gray-800">Connecting to host…</p>
+					<p class="mt-1 text-sm text-gray-600">Waiting for the room to accept your connection.</p>
+				{/if}
+				{#if peerStore.error}
+					<p class="mt-2 text-sm text-red-600">{peerStore.error}</p>
+				{/if}
+			</div>
+		{:else}
+			<BillTitle />
 		{#if !peerStore.isGuest}
 			<div data-tour="parse">
 				<ReceiptScanner />
@@ -82,6 +113,7 @@
 		<div data-tour="export">
 			<ExportImport />
 		</div>
+		{/if}
 	</main>
 
 	{#if tourActive}

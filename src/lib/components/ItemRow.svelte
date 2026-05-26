@@ -85,6 +85,10 @@
 		}
 	}
 
+	const canEditItem = $derived(
+		!peerStore.isGuest || syncedBillStore.settings.guestsCanEditItems !== false
+	);
+
 	function getPortion(personId: string): number {
 		return item.portions?.[personId] ?? 1;
 	}
@@ -170,15 +174,17 @@
 					{#if item.quantity > 1}
 						<span class="text-xs text-gray-500">x{item.quantity}</span>
 					{/if}
-					<button
-						onclick={startEditing}
-						class="rounded p-1 text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600"
-						title="Edit item"
-					>
-						<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-						</svg>
-					</button>
+					{#if canEditItem}
+						<button
+							onclick={startEditing}
+							class="rounded p-1 text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600"
+							title="Edit item"
+						>
+							<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+							</svg>
+						</button>
+					{/if}
 					<button
 						onclick={() => syncedBillStore.toggleMultipart(item.id)}
 						class="rounded p-1 transition-colors {item.isMultipart
@@ -267,7 +273,7 @@
 
 			<div class="flex items-center gap-2">
 				<span class="font-semibold text-gray-800">{formatPrice(totalPrice)}</span>
-				{#if !peerStore.isGuest}
+				{#if canEditItem}
 					<button
 						onclick={() => syncedBillStore.removeItem(item.id)}
 						class="rounded p-1 text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600"

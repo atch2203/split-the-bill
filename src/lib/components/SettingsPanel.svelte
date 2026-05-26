@@ -84,8 +84,15 @@
 
 	// Preset tip percentages
 	const tipPresets = [0, 10, 15, 18, 20];
+
+	const canSeePanel = $derived(
+		!peerStore.isGuest || syncedBillStore.settings.guestsCanEditSettings !== false
+	);
+
+	let permissionsCollapsed = $state(true);
 </script>
 
+{#if canSeePanel}
 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
 	<button
 		onclick={() => (isCollapsed = !isCollapsed)}
@@ -220,6 +227,66 @@
 				</p>
 			{/if}
 		</div>
+
+		{#if !peerStore.isGuest}
+			<div class="border-t border-gray-200 pt-3">
+				<button
+					onclick={() => (permissionsCollapsed = !permissionsCollapsed)}
+					class="flex w-full items-center justify-between {permissionsCollapsed ? '' : 'mb-2'} text-left"
+				>
+					<p class="text-sm font-medium text-gray-700">Guest permissions</p>
+					<svg
+						class="h-4 w-4 text-gray-500 transition-transform {permissionsCollapsed ? '' : 'rotate-180'}"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+					</svg>
+				</button>
+				{#if !permissionsCollapsed}
+				<div class="space-y-1.5">
+					<label class="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+						<input
+							type="checkbox"
+							checked={syncedBillStore.settings.guestsCanAddItems !== false}
+							onchange={(e) =>
+								syncedBillStore.updateSettings({
+									guestsCanAddItems: (e.target as HTMLInputElement).checked
+								})}
+							class="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
+						/>
+						<span>Guests can add items</span>
+					</label>
+					<label class="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+						<input
+							type="checkbox"
+							checked={syncedBillStore.settings.guestsCanEditItems !== false}
+							onchange={(e) =>
+								syncedBillStore.updateSettings({
+									guestsCanEditItems: (e.target as HTMLInputElement).checked
+								})}
+							class="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
+						/>
+						<span>Guests can edit items</span>
+					</label>
+					<label class="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+						<input
+							type="checkbox"
+							checked={syncedBillStore.settings.guestsCanEditSettings !== false}
+							onchange={(e) =>
+								syncedBillStore.updateSettings({
+									guestsCanEditSettings: (e.target as HTMLInputElement).checked
+								})}
+							class="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
+						/>
+						<span>Guests can edit settings</span>
+					</label>
+				</div>
+				{/if}
+			</div>
+		{/if}
 	</div>
 	{/if}
 </div>
+{/if}

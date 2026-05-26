@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { peerStore } from '$lib/stores/peerStore.svelte';
 	import { billStore } from '$lib/stores/billStore.svelte';
+	import { handleGuestAction } from '$lib/utils/guestActionDispatch';
 
 	let isSharing = $state(false);
 	let shareUrl = $state('');
@@ -31,12 +32,16 @@
 			(state) => {
 				billStore.setState(state);
 			},
-			// onAction - when host receives action from guest
+			// onAction - when host receives action from guest. Route through validating
+			// dispatcher (whitelist + arg sanitization + permission checks) — DO NOT
+			// reflect on billStore directly; that would let a guest call resetAll,
+			// setState, removePerson, etc. After dispatching, force a broadcast so the
+			// change propagates even if local mutation broadcasts are paused (e.g. the
+			// host is in the middle of the tour). Any tour-only sample data is stripped
+			// by the peerStore stateFilter.
 			(action, args) => {
-				const fn = (billStore as Record<string, unknown>)[action];
-				if (typeof fn === 'function') {
-					(fn as (...args: unknown[]) => void)(...args);
-				}
+				handleGuestAction(action, args);
+				peerStore.broadcastState();
 			},
 			// getState - for host to get current state
 			() => billStore.getState()

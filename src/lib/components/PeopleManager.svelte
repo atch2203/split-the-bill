@@ -5,6 +5,7 @@
 	let splitCount = $state(2);
 	let newPersonName = $state('');
 	let nameInputElement: HTMLInputElement;
+	let isCollapsed = $state(false);
 
 	function handleQuickSplit() {
 		if (splitCount < 1) return;
@@ -38,8 +39,27 @@
 </script>
 
 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-	<h2 class="mb-3 text-lg font-semibold text-gray-800">People</h2>
+	<button
+		onclick={() => (isCollapsed = !isCollapsed)}
+		class="flex w-full items-center justify-between {isCollapsed ? '' : 'mb-3'} text-left"
+	>
+		<h2 class="text-lg font-semibold text-gray-800">
+			People
+			{#if syncedBillStore.people.length > 0}
+				<span class="text-sm font-normal text-gray-500">({syncedBillStore.people.length})</span>
+			{/if}
+		</h2>
+		<svg
+			class="h-5 w-5 text-gray-500 transition-transform {isCollapsed ? '' : 'rotate-180'}"
+			fill="none"
+			stroke="currentColor"
+			viewBox="0 0 24 24"
+		>
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+		</svg>
+	</button>
 
+	{#if !isCollapsed}
 	<div class="space-y-3">
 		<!-- Quick split by number -->
 		<div class="flex items-center gap-2">
@@ -100,4 +120,5 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 </div>
