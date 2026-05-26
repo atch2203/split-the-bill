@@ -2,7 +2,7 @@
 	import type { ReceiptItem } from '$lib/types';
 	import { syncedBillStore } from '$lib/stores/syncedBillStore.svelte';
 	import { peerStore } from '$lib/stores/peerStore.svelte';
-	import PersonBadge from './PersonBadge.svelte';
+	import { identityStore } from '$lib/stores/identityStore.svelte';
 	import { formatPrice, parsePrice } from '$lib/utils/receiptParser';
 
 	interface Props {
@@ -59,6 +59,31 @@
 
 	const totalPrice = $derived(item.price * item.quantity);
 	const isUnassigned = $derived(item.assignedTo.length === 0);
+
+	const isSelfAssigned = $derived(
+		identityStore.currentPersonId ? item.assignedTo.includes(identityStore.currentPersonId) : false
+	);
+
+	const assignedPeople = $derived(
+		item.assignedTo
+			.map((id) => syncedBillStore.people.find((p) => p.id === id))
+			.filter((p): p is NonNullable<typeof p> => p != null)
+	);
+
+	const unassignedOthers = $derived(
+		syncedBillStore.people.filter(
+			(p) => !item.assignedTo.includes(p.id) && p.id !== identityStore.currentPersonId
+		)
+	);
+
+	function handleAddOther(event: Event) {
+		const select = event.target as HTMLSelectElement;
+		const personId = select.value;
+		if (personId) {
+			syncedBillStore.toggleAssignment(item.id, personId);
+			select.value = '';
+		}
+	}
 </script>
 
 <div
@@ -131,18 +156,47 @@
 					</button>
 				</div>
 
-				<!-- Person Assignment -->
-				<div class="mt-2 flex flex-wrap gap-1">
-					{#if syncedBillStore.people.length > 0}
-						{#each syncedBillStore.people as person (person.id)}
-							<PersonBadge
-								{person}
-								selected={item.assignedTo.includes(person.id)}
-								onclick={() => syncedBillStore.toggleAssignment(item.id, person.id)}
-							/>
+				<!-- Assigned People -->
+				{#if assignedPeople.length > 0}
+					<div class="mt-1.5 flex flex-wrap gap-1">
+						{#each assignedPeople as person (person.id)}
+							<span
+								class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+								style="background-color: {person.color}40; border: 1px solid {person.color};"
+							>
+								{person.name}
+								<button
+									onclick={() => syncedBillStore.toggleAssignment(item.id, person.id)}
+									class="ml-0.5 leading-none opacity-60 transition-opacity hover:opacity-100"
+									title="Remove {person.name}"
+								>&times;</button>
+							</span>
 						{/each}
-					{:else}
-						<span class="text-xs text-gray-400">Add people to assign</span>
+					</div>
+				{/if}
+
+				<!-- Assignment Controls -->
+				<div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+					{#if identityStore.currentPersonId}
+						<button
+							onclick={() => syncedBillStore.toggleAssignment(item.id, identityStore.currentPersonId!)}
+							class="rounded-full px-3 py-0.5 text-xs font-medium transition-colors {isSelfAssigned
+								? 'bg-green-100 text-green-800 border border-green-300 hover:bg-red-50 hover:text-red-700 hover:border-red-300'
+								: 'bg-blue-100 text-blue-700 border border-blue-300 hover:bg-blue-200'}"
+						>
+							{isSelfAssigned ? '✓ Me' : '+ Me'}
+						</button>
+					{/if}
+					{#if unassignedOthers.length > 0}
+						<select
+							onchange={handleAddOther}
+							class="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 focus:border-blue-500 focus:outline-none"
+						>
+							<option value="">+ Other</option>
+							{#each unassignedOthers as person (person.id)}
+								<option value={person.id}>{person.name}</option>
+							{/each}
+						</select>
 					{/if}
 				</div>
 			</div>

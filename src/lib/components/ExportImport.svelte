@@ -35,9 +35,6 @@
 	function generateTextSummary(withAssignments: boolean): string {
 		const lines: string[] = [];
 
-		lines.push('=== Split the Bill Summary ===');
-		lines.push('');
-
 		// Totals
 		const billTotal = syncedBillStore.subtotal + syncedBillStore.settings.taxAmount + syncedBillStore.effectiveTipAmount;
 		lines.push(`Subtotal: ${formatPrice(syncedBillStore.subtotal)}`);
@@ -71,6 +68,9 @@
 				}
 			}
 		}
+
+		lines.push('');
+		lines.push('🧾 https://atch2203.github.io/split-the-bill');
 
 		return lines.join('\n');
 	}
@@ -234,6 +234,10 @@
 					<h2>Each Person Owes</h2>
 					${personHtml}
 				` : ''}
+
+				<p style="margin-top: 24px; font-size: 12px; color: #888; text-align: center;">
+					🧾 <a href="https://atch2203.github.io/split-the-bill" style="color: #888;">https://atch2203.github.io/split-the-bill</a>
+				</p>
 			</body>
 			</html>
 		`;

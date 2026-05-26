@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ReceiptScanner from '$lib/components/ReceiptScanner.svelte';
 	import PeopleManager from '$lib/components/PeopleManager.svelte';
+	import IdentityPicker from '$lib/components/IdentityPicker.svelte';
 	import ItemList from '$lib/components/ItemList.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 	import PaymentSummary from '$lib/components/PaymentSummary.svelte';
@@ -44,7 +45,10 @@
 		{#if !peerStore.isGuest}
 			<ReceiptScanner />
 		{/if}
-		<PeopleManager />
+		<IdentityPicker />
+		{#if !peerStore.isGuest}
+			<PeopleManager />
+		{/if}
 		<ItemList />
 		<SettingsPanel />
 		<PaymentSummary />
