@@ -12,6 +12,8 @@ export interface Person {
 	id: string;
 	name: string;
 	color: string; // For visual distinction
+	done?: boolean; // Person finished selecting their items
+	paid?: boolean; // Host-confirmed their payment was received
 }
 
 export interface BillSettings {

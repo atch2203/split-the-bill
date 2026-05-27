@@ -40,6 +40,7 @@ export const syncedBillStore = {
 	setItems: createSyncedAction('setItems', billStore.setItems),
 	addPerson: createSyncedAction('addPerson', billStore.addPerson),
 	removePerson: createSyncedAction('removePerson', billStore.removePerson),
+	setPersonDone: createSyncedAction('setPersonDone', billStore.setPersonDone),
 	toggleAssignment: createSyncedAction('toggleAssignment', billStore.toggleAssignment),
 	toggleMultipart: createSyncedAction('toggleMultipart', billStore.toggleMultipart),
 	setPortion: createSyncedAction('setPortion', billStore.setPortion),
@@ -49,6 +50,7 @@ export const syncedBillStore = {
 	updatePaymentMethod: createSyncedAction('updatePaymentMethod', billStore.updatePaymentMethod) as (id: string, updates: Partial<Omit<PaymentMethod, 'id'>>) => void,
 
 	// Host-only actions (not synced to guests)
+	setPersonPaid: billStore.setPersonPaid,
 	setRawOcrText: billStore.setRawOcrText,
 	resetAll: billStore.resetAll,
 

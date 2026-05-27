@@ -188,32 +188,51 @@
 		clearMessages();
 	}
 
-	function applyImport(data: { version?: number; items?: unknown; people?: unknown; settings?: unknown; paymentMethods?: unknown }): void {
-		if (data.version !== 1 || !data.items || !data.people || !data.settings) {
+	function applyImport(raw: { version?: number; items?: unknown; people?: unknown; settings?: unknown; paymentMethods?: unknown }): void {
+		if (raw.version !== 1 || !raw.items || !raw.people || !raw.settings) {
 			throw new Error('Invalid data format');
 		}
 
-		const items = data.items as { assignedTo: string[] }[];
-		const people = data.people as { id: string; name: string }[];
+		// Deep-clone the incoming data first. loadSession passes the live savedSessions
+		// object; without this we'd push those same Svelte $state proxies into
+		// billStore.items and then mutate objects owned by two reactive trees at once
+		// (which breaks), and we'd corrupt the stored save in place on every load.
+		const data = JSON.parse(JSON.stringify(raw)) as {
+			items: { name?: string; price?: number; quantity?: number; assignedTo?: string[]; isMultipart?: boolean; portions?: Record<string, number> }[];
+			people: { id: string; name: string; done?: boolean; paid?: boolean }[];
+			settings: Record<string, unknown>;
+			paymentMethods?: { label?: string; value?: string }[];
+		};
 
-		billStore.setItems(items as Parameters<typeof billStore.setItems>[0]);
-		// Clear existing people and add new ones
+		// Recreate people fresh, mapping each saved id to its new one, preserving done/paid.
 		while (billStore.people.length > 0) {
 			billStore.removePerson(billStore.people[0].id);
 		}
-		for (const person of people) {
-			billStore.addPerson(person.name);
+		const idMap = new Map<string, string>();
+		for (const person of data.people) {
+			const added = billStore.addPerson(person.name);
+			idMap.set(person.id, added.id);
+			if (person.done) billStore.setPersonDone(added.id, true);
+			if (person.paid) billStore.setPersonPaid(added.id, true);
 		}
-		// Update assignments to use new person IDs
-		const personIdMap = new Map<string, string>();
-		people.forEach((oldPerson, index) => {
-			personIdMap.set(oldPerson.id, billStore.people[index].id);
-		});
-		for (const item of billStore.items) {
-			item.assignedTo = item.assignedTo
-				.map((oldId: string) => personIdMap.get(oldId))
+
+		// Rebuild items with assignedTo AND portions remapped to the new person ids.
+		const remapped = data.items.map((it) => {
+			const assignedTo = (Array.isArray(it.assignedTo) ? it.assignedTo : [])
+				.map((oldId) => idMap.get(oldId))
 				.filter((id): id is string => id !== undefined);
-		}
+			let portions: Record<string, number> | undefined;
+			if (it.portions && typeof it.portions === 'object') {
+				portions = {};
+				for (const [oldId, v] of Object.entries(it.portions)) {
+					const newId = idMap.get(oldId);
+					if (newId !== undefined) portions[newId] = v;
+				}
+			}
+			return { ...it, assignedTo, ...(portions ? { portions } : {}) };
+		});
+		billStore.setItems(remapped as Parameters<typeof billStore.setItems>[0]);
+
 		billStore.updateSettings(data.settings as Parameters<typeof billStore.updateSettings>[0]);
 
 		// Replace payment methods (optional, present in newer exports)
@@ -222,7 +241,7 @@
 			billStore.removePaymentMethod(pm.id);
 		}
 		if (Array.isArray(data.paymentMethods)) {
-			for (const pm of data.paymentMethods as { label?: string; value?: string }[]) {
+			for (const pm of data.paymentMethods) {
 				billStore.addPaymentMethod(pm.label ?? '', pm.value ?? '');
 			}
 		}
@@ -249,7 +268,8 @@
 	}
 
 	function openSaveForm() {
-		saveNameInput = `Bill ${new Date().toLocaleString()}`;
+		const title = (syncedBillStore.settings.title ?? '').trim();
+		saveNameInput = title || `Bill ${new Date().toLocaleString()}`;
 		showSaveForm = true;
 	}
 
@@ -465,32 +485,30 @@
 			{peerStore.isGuest ? 'Export Data' : 'Import / Export Data'}
 		</button>
 
-		{#if !peerStore.isGuest}
-			<button
-				onclick={openSaveForm}
-				class="flex w-full items-center justify-center gap-1.5 rounded-lg bg-teal-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-600 sm:w-auto sm:justify-start"
-				title="Save current bill to this browser"
-			>
-				<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-				</svg>
-				Save to browser
-			</button>
-			<button
-				onclick={() => (showSaves = !showSaves)}
-				disabled={savedSessions.length === 0}
-				class="flex w-full items-center justify-center gap-1.5 rounded-lg bg-teal-400 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:justify-start"
-				title={savedSessions.length === 0 ? 'No saved sessions' : 'Show saved sessions'}
-			>
-				<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
-				</svg>
-				Saved sessions ({savedSessions.length})
-			</button>
-		{/if}
+		<button
+			onclick={openSaveForm}
+			class="flex w-full items-center justify-center gap-1.5 rounded-lg bg-teal-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-600 sm:w-auto sm:justify-start"
+			title="Save current bill to this browser"
+		>
+			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+			</svg>
+			Save to browser
+		</button>
+		<button
+			onclick={() => (showSaves = !showSaves)}
+			disabled={savedSessions.length === 0}
+			class="flex w-full items-center justify-center gap-1.5 rounded-lg bg-teal-400 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:justify-start"
+			title={savedSessions.length === 0 ? 'No saved sessions' : 'Show saved sessions'}
+		>
+			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+			</svg>
+			Saved sessions ({savedSessions.length})
+		</button>
 	</div>
 
-	{#if !peerStore.isGuest && showSaveForm}
+	{#if showSaveForm}
 		<div class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 p-3">
 			<label class="text-sm text-gray-700" for="save-name">Name:</label>
 			<input
@@ -518,7 +536,7 @@
 		</div>
 	{/if}
 
-	{#if !peerStore.isGuest && showSaves && savedSessions.length > 0}
+	{#if showSaves && savedSessions.length > 0}
 		<div class="mt-3 space-y-1.5">
 			{#each savedSessions as session (session.id)}
 				<div class="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
@@ -526,12 +544,18 @@
 						<div class="truncate font-medium text-gray-800">{session.name}</div>
 						<div class="text-xs text-gray-500">{formatSavedAt(session.savedAt)}</div>
 					</div>
-					<button
-						onclick={() => loadSession(session.id)}
-						class="rounded-lg bg-teal-500 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-teal-600"
-					>
-						Load
-					</button>
+					{#if !peerStore.isGuest}
+						<button
+							onclick={() => loadSession(session.id)}
+							class="rounded-lg bg-teal-500 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-teal-600"
+						>
+							Load
+						</button>
+					{:else}
+						<span class="text-xs text-gray-400" title="Leave the room to load a saved bill">
+							Leave room to load
+						</span>
+					{/if}
 					<button
 						onclick={() => deleteSession(session.id)}
 						class="rounded p-1 text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600"

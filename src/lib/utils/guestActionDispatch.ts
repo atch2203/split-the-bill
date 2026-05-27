@@ -74,6 +74,15 @@ export function handleGuestAction(action: string, rawArgs: unknown): void {
 			return;
 		}
 
+		case 'setPersonDone': {
+			// Allowed for any guest — marking done is part of the selection flow.
+			// UI only exposes the toggle for the guest's own identity; the host can
+			// override anyone. Either way we only need a valid personId + boolean.
+			if (!isPersonId(args[0]) || typeof args[1] !== 'boolean') return;
+			billStore.setPersonDone(args[0], args[1]);
+			return;
+		}
+
 		case 'toggleAssignment': {
 			// Allowed for any guest — they need to assign themselves to items.
 			if (!isItemId(args[0]) || !isPersonId(args[1])) return;
@@ -179,8 +188,8 @@ export function handleGuestAction(action: string, rawArgs: unknown): void {
 		}
 
 		// Explicitly host-only — silently drop:
-		// removePerson, setItems, setState, getState, setOnStateChange, setRawOcrText, resetAll,
-		// addPaymentMethod, removePaymentMethod, updatePaymentMethod.
+		// removePerson, setPersonPaid, setItems, setState, getState, setOnStateChange,
+		// setRawOcrText, resetAll, addPaymentMethod, removePaymentMethod, updatePaymentMethod.
 		// Unknown identifiers: drop.
 		default:
 			return;
@@ -191,6 +200,7 @@ export function handleGuestAction(action: string, rawArgs: unknown): void {
 // Mirrors the dispatcher; the dispatcher is the trust boundary, this is just a hint.
 export const ALLOWED_GUEST_ACTIONS = new Set([
 	'addPerson',
+	'setPersonDone',
 	'toggleAssignment',
 	'setPortion',
 	'toggleMultipart',

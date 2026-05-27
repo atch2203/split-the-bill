@@ -7,6 +7,10 @@
 	let nameInputElement: HTMLInputElement;
 	let isCollapsed = $state(false);
 
+	const allDone = $derived(
+		syncedBillStore.people.length > 0 && syncedBillStore.people.every((p) => p.done)
+	);
+
 	function handleQuickSplit() {
 		if (splitCount < 1) return;
 		// Clear existing people
@@ -43,10 +47,17 @@
 		onclick={() => (isCollapsed = !isCollapsed)}
 		class="flex w-full items-center justify-between {isCollapsed ? '' : 'mb-3'} text-left"
 	>
-		<h2 class="text-lg font-semibold text-gray-800">
+		<h2 class="flex items-center gap-2 text-lg font-semibold text-gray-800">
 			People
 			{#if syncedBillStore.people.length > 0}
 				<span class="text-sm font-normal text-gray-500">({syncedBillStore.people.length})</span>
+			{/if}
+			{#if allDone}
+				<span
+					class="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
+				>
+					&#10003; Everyone's done
+				</span>
 			{/if}
 		</h2>
 		<svg
@@ -115,6 +126,7 @@
 						{person}
 						showRemove={true}
 						onremove={() => syncedBillStore.removePerson(person.id)}
+						ondone={() => syncedBillStore.setPersonDone(person.id, !person.done)}
 					/>
 				{/each}
 			</div>

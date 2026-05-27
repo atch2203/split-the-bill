@@ -63,12 +63,28 @@ let hostPasscode = $state<string>(''); // Passcode set by host
 let awaitingPasscode = $state<boolean>(false); // Guest waiting to enter passcode
 let pendingConnection = $state<DataConnection | null>(null); // Connection waiting for auth
 
+// Initial-join retry state (guest): cap attempts with exponential backoff, then stop.
+const MAX_JOIN_ATTEMPTS = 5;
+let joinAttempts = $state<number>(0); // 1-based count of attempts made
+let joinFailed = $state<boolean>(false); // True once all attempts exhausted
+let joinRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let joinRetryResolve: (() => void) | null = null; // Resolver for the in-progress backoff sleep
+let joinAborted = false; // Set when the user exits; stops the retry loop
+// Set during disconnect() so the peer/conn teardown events don't re-arm reconnection.
+let tearingDown = false;
+
 // Reconnection state
 let lastHostId = $state<string | null>(null); // For guests: the host they were connected to
 let lastPasscode = $state<string>(''); // Passcode used in last connection
 let wasHost = $state<boolean>(false); // Were we hosting before disconnect?
 let canReconnect = $state<boolean>(false); // Can we attempt to reconnect?
 let isReconnecting = $state<boolean>(false); // Currently attempting to reconnect
+// Auto-reconnect loop (both host and guest): keep retrying with capped backoff
+// until reconnected or the user dismisses/leaves.
+let reconnectLoopActive = false;
+let reconnectAborted = false;
+let reconnectAttempts = $state<number>(0);
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Callbacks for store integration
 let onStateSync: ((state: SyncMessage['payload']) => void) | null = null;
@@ -141,19 +157,23 @@ async function startHost(passcode: string = '', existingId?: string): Promise<st
 
 	// Handle peer disconnection/error for reconnection
 	newPeer.on('disconnected', () => {
+		if (tearingDown) return;
 		console.log('Host peer disconnected from server');
 		if (!canReconnect && isHost) {
 			canReconnect = true;
 			isConnected = false;
 			error = 'Disconnected from server';
+			startReconnectLoop();
 		}
 	});
 
 	newPeer.on('close', () => {
+		if (tearingDown) return;
 		console.log('Host peer closed');
 		if (!canReconnect && isHost) {
 			canReconnect = true;
 			isConnected = false;
+			startReconnectLoop();
 		}
 	});
 
@@ -218,8 +238,10 @@ async function startHost(passcode: string = '', existingId?: string): Promise<st
 	return peerId!;
 }
 
-// Guest: connect to host
-async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
+// Guest: connect to host. `isReconnect` keeps the full-screen connecting takeover
+// off during auto-reconnect — the header "Reconnecting…" banner covers that case,
+// matching host behavior (host restarts don't blank the app either).
+async function joinHost(hostId: string, passcode: string = '', isReconnect: boolean = false): Promise<void> {
 	if (peer) {
 		peer.destroy();
 	}
@@ -227,9 +249,11 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 	isHost = false;
 	error = null;
 	awaitingPasscode = false;
-	canReconnect = false;
-	isReconnecting = false;
-	isJoining = true;
+	if (!isReconnect) {
+		canReconnect = false;
+		isReconnecting = false;
+		isJoining = true;
+	}
 
 	// Save for reconnection
 	lastHostId = hostId;
@@ -241,24 +265,57 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 
 	// Handle peer disconnection for reconnection
 	newPeer.on('disconnected', () => {
+		if (tearingDown) return;
 		console.log('Guest peer disconnected from server');
 		if (!canReconnect && !isHost && lastHostId) {
 			canReconnect = true;
 			isConnected = false;
 			error = 'Disconnected from server';
+			startReconnectLoop();
 		}
 	});
 
 	newPeer.on('close', () => {
+		if (tearingDown) return;
 		console.log('Guest peer closed');
 		if (!canReconnect && !isHost && lastHostId) {
 			canReconnect = true;
 			isConnected = false;
+			startReconnectLoop();
 		}
 	});
 
 	return new Promise((resolve, reject) => {
+		// Settle exactly once and tear down this attempt's timeout. Without this,
+		// a failed attempt's 30s timeout fires later and flips isJoining off mid-retry,
+		// and a fast peer error followed by the timeout would double-settle.
+		let settled = false;
+		let timeoutId: ReturnType<typeof setTimeout>;
+		const fail = (err: Error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeoutId);
+			error = err.message;
+			isJoining = false;
+			reject(err);
+		};
+		const succeed = () => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeoutId);
+			resolve();
+		};
+
 		const conn = newPeer.connect(hostId, { reliable: true });
+
+		// Peer-level errors (host offline / bad room id → 'peer-unavailable', network
+		// failures, etc.) fire on the Peer, not the connection. Without handling them
+		// the attempt would hang until the 30s timeout. Fail fast so the retry loop can
+		// back off. Ignore once connected or while waiting on a passcode prompt.
+		newPeer.on('error', (err) => {
+			if (isConnected || awaitingPasscode) return;
+			fail(err instanceof Error ? err : new Error(String(err)));
+		});
 
 		conn.on('open', () => {
 			pendingConnection = conn;
@@ -283,13 +340,11 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 					awaitingPasscode = false;
 					isConnected = true;
 					isJoining = false;
-					resolve();
+					succeed();
 				} else {
-					error = message.error || 'Authentication failed';
 					awaitingPasscode = false;
 					pendingConnection = null;
-					isJoining = false;
-					reject(new Error(message.error || 'Authentication failed'));
+					fail(new Error(message.error || 'Authentication failed'));
 				}
 			} else if (message.type === 'sync' && onStateSync) {
 				onStateSync(message.payload);
@@ -299,33 +354,113 @@ async function joinHost(hostId: string, passcode: string = ''): Promise<void> {
 		});
 
 		conn.on('close', () => {
+			const wasConnected = isConnected;
 			hostConnection = null;
 			pendingConnection = null;
 			isConnected = false;
 			isJoining = false;
-			if (!error) {
-				error = 'Disconnected from host';
-			}
-			// Enable reconnection if we had a valid connection
-			if (lastHostId && !canReconnect) {
-				canReconnect = true;
+			// Settle the join promise so an attempt closed by teardown/destroy doesn't
+			// hang until the 30s timeout (which would keep the connect spinner up).
+			if (!settled) fail(new Error('Connection closed'));
+			if (tearingDown) return;
+			// Only treat as a recoverable disconnect (show Reconnect banner) if we had
+			// actually connected. A close on an attempt that never opened is a failed
+			// join — the retry loop handles it, no spurious banner.
+			if (wasConnected) {
+				if (!error) error = 'Disconnected from host';
+				if (lastHostId && !canReconnect) {
+					canReconnect = true;
+					startReconnectLoop();
+				}
 			}
 		});
 
 		conn.on('error', (err) => {
-			error = err.message;
-			isJoining = false;
-			reject(err);
+			fail(err instanceof Error ? err : new Error(String(err)));
 		});
 
-		// Timeout after 30 seconds (longer to allow passcode entry)
-		setTimeout(() => {
+		// Timeout (longer to allow passcode entry). Cleared on settle.
+		timeoutId = setTimeout(() => {
 			if (!isConnected && !awaitingPasscode) {
-				isJoining = false;
-				reject(new Error('Connection timeout'));
+				fail(new Error('Connection timeout'));
 			}
 		}, 30000);
 	});
+}
+
+// Guest: connect with capped exponential-backoff retry.
+// joinHost rejects on timeout/error but NOT while awaiting a passcode, so the
+// passcode prompt never counts as a failed attempt. isJoining stays true through
+// backoff waits so the UI keeps showing the connect screen.
+async function joinWithRetry(hostId: string, passcode: string = ''): Promise<void> {
+	joinAborted = false;
+	joinFailed = false;
+	joinAttempts = 0;
+	if (joinRetryTimer) {
+		clearTimeout(joinRetryTimer);
+		joinRetryTimer = null;
+	}
+
+	while (!joinAborted) {
+		joinAttempts++;
+		try {
+			await joinHost(hostId, passcode);
+			return; // Connected.
+		} catch {
+			if (joinAborted) return;
+			if (joinAttempts >= MAX_JOIN_ATTEMPTS) {
+				joinFailed = true;
+				isJoining = false;
+				return;
+			}
+			// Keep the connect screen up while we wait out the backoff.
+			isJoining = true;
+			const delay = Math.min(1000 * 2 ** (joinAttempts - 1), 30000);
+			// Cancelable sleep: exitRoom()/disconnect() resolve this immediately so the
+			// loop can notice joinAborted instead of hanging on a cleared timer.
+			await new Promise<void>((resolve) => {
+				joinRetryResolve = resolve;
+				joinRetryTimer = setTimeout(() => {
+					joinRetryTimer = null;
+					joinRetryResolve = null;
+					resolve();
+				}, delay);
+			});
+		}
+	}
+}
+
+// Guest: manual retry after attempts were exhausted.
+async function retryJoin(): Promise<void> {
+	if (!lastHostId) return;
+	await joinWithRetry(lastHostId, lastPasscode);
+}
+
+// Cancel an in-progress backoff sleep: clear the timer AND resolve the awaited
+// promise, otherwise joinWithRetry would hang forever waiting on a dead timer.
+function cancelJoinRetryWait(): void {
+	if (joinRetryTimer) {
+		clearTimeout(joinRetryTimer);
+		joinRetryTimer = null;
+	}
+	if (joinRetryResolve) {
+		const resolve = joinRetryResolve;
+		joinRetryResolve = null;
+		resolve();
+	}
+}
+
+// Guest: give up and leave the room (cancels any pending retry + clears the URL).
+function exitRoom(): void {
+	joinAborted = true;
+	cancelJoinRetryWait();
+	disconnect();
+	if (typeof window !== 'undefined') {
+		const url = new URL(window.location.href);
+		url.searchParams.delete('room');
+		url.searchParams.delete('p');
+		window.history.replaceState({}, '', url.toString());
+	}
 }
 
 // Guest: submit passcode
@@ -347,8 +482,8 @@ async function reconnect(): Promise<void> {
 			// Host: restart with same ID
 			await startHost(lastPasscode, peerId);
 		} else if (lastHostId) {
-			// Guest: reconnect to host
-			await joinHost(lastHostId, lastPasscode);
+			// Guest: reconnect to host (keeps the header banner, no full-screen takeover)
+			await joinHost(lastHostId, lastPasscode, true);
 		}
 		canReconnect = false;
 	} catch (err) {
@@ -359,8 +494,48 @@ async function reconnect(): Promise<void> {
 	}
 }
 
+// Auto-reconnect loop: kicked off whenever an established session drops (host or
+// guest). Keeps retrying reconnect() with capped exponential backoff until we're
+// back online or the user dismisses/leaves. Only one loop runs at a time.
+async function startReconnectLoop(): Promise<void> {
+	if (reconnectLoopActive) return;
+	reconnectLoopActive = true;
+	reconnectAborted = false;
+	reconnectAttempts = 0;
+
+	while (canReconnect && !reconnectAborted) {
+		reconnectAttempts++;
+		// reconnect() clears canReconnect on success, re-sets it on failure. This is
+		// the right signal for both roles — a host is "back" once its peer re-opens,
+		// even with no guests yet (isConnected would still be false there).
+		await reconnect();
+		if (!canReconnect) break; // reconnected
+		if (reconnectAborted) break;
+		const delay = Math.min(1000 * 2 ** (reconnectAttempts - 1), 30000);
+		await new Promise<void>((resolve) => {
+			reconnectTimer = setTimeout(() => {
+				reconnectTimer = null;
+				resolve();
+			}, delay);
+		});
+	}
+
+	reconnectLoopActive = false;
+}
+
+// Stop the auto-reconnect loop and cancel any pending backoff timer.
+function stopReconnectLoop(): void {
+	reconnectAborted = true;
+	if (reconnectTimer) {
+		clearTimeout(reconnectTimer);
+		reconnectTimer = null;
+	}
+	reconnectAttempts = 0;
+}
+
 // Clear reconnection state
 function clearReconnect(): void {
+	stopReconnectLoop();
 	canReconnect = false;
 	lastHostId = null;
 	lastPasscode = '';
@@ -410,10 +585,16 @@ function sendAction(action: string, args: unknown[]): void {
 
 // Disconnect and cleanup
 function disconnect(): void {
+	// Stop the join retry loop first so the peer.destroy() teardown events below
+	// don't re-arm reconnection, and any pending backoff sleep unblocks.
+	joinAborted = true;
+	cancelJoinRetryWait();
+	tearingDown = true;
 	if (peer) {
 		peer.destroy();
 		peer = null;
 	}
+	tearingDown = false;
 	peerId = null;
 	isHost = false;
 	isConnected = false;
@@ -425,6 +606,8 @@ function disconnect(): void {
 	hostPasscode = '';
 	awaitingPasscode = false;
 	isJoining = false;
+	joinFailed = false;
+	joinAttempts = 0;
 	// Clear reconnection state on intentional disconnect
 	clearReconnect();
 }
@@ -479,11 +662,18 @@ export const peerStore = {
 	get hasPasscode() { return !!hostPasscode; },
 	get canReconnect() { return canReconnect; },
 	get isReconnecting() { return isReconnecting; },
+	get reconnectAttempts() { return reconnectAttempts; },
 	get isJoining() { return isJoining; },
 	get wasHost() { return wasHost; },
+	get joinFailed() { return joinFailed; },
+	get joinAttempts() { return joinAttempts; },
+	get maxJoinAttempts() { return MAX_JOIN_ATTEMPTS; },
 
 	startHost,
 	joinHost,
+	joinWithRetry,
+	retryJoin,
+	exitRoom,
 	submitPasscode,
 	reconnect,
 	clearReconnect,

@@ -57,11 +57,24 @@
 		syncedBillStore.personTotals.reduce((sum, t) => sum + t.grandTotal, 0)
 	);
 	const roundingDifference = $derived(Math.abs(billTotal - syncedBillStore.effectiveCashBack - sumOfShares));
+
+	const allDone = $derived(
+		syncedBillStore.people.length > 0 && syncedBillStore.people.every((p) => p.done)
+	);
 </script>
 
 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
 	<div class="mb-3">
-		<h2 class="text-lg font-semibold text-gray-800">Summary</h2>
+		<div class="flex items-center gap-2">
+			<h2 class="text-lg font-semibold text-gray-800">Summary</h2>
+			{#if allDone}
+				<span
+					class="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
+				>
+					&#10003; Everyone's done selecting
+				</span>
+			{/if}
+		</div>
 		{#if syncedBillStore.settings.title}
 			<p class="text-sm text-gray-500">{syncedBillStore.settings.title}</p>
 		{/if}
@@ -131,27 +144,60 @@
 				{#each syncedBillStore.personTotals as total (total.personId)}
 					{@const isMe = total.personId === identityStore.currentPersonId}
 					{@const color = getPersonColor(total.personId)}
+					{@const person = syncedBillStore.people.find((p) => p.id === total.personId)}
 					<div
 						class="rounded-lg border-2 p-3"
 						style="border-color: {color}; {isMe
 							? `background-color: ${color}26; box-shadow: 0 0 0 3px ${color};`
 							: ''}"
 					>
-						<div class="mb-2 flex items-center justify-between">
+						<div class="mb-2 flex items-center justify-between gap-2">
 							<span
-								class="flex items-center gap-2 font-semibold"
+								class="flex min-w-0 items-center gap-2 font-semibold"
 								style="color: {color};"
 							>
-								{total.personName}
+								<span class="truncate">{total.personName}</span>
 								{#if isMe}
 									<span
-										class="rounded-full px-2 py-0.5 text-xs font-bold text-white"
+										class="flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-bold text-white"
 										style="background-color: {color};"
 									>You</span>
 								{/if}
+								{#if person?.done}
+									<span
+										class="flex flex-shrink-0 items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
+										title="Done selecting items"
+									>
+										&#10003; Done
+									</span>
+								{/if}
 							</span>
-							<span class="text-xl font-bold text-gray-800">
-								{formatPrice(total.grandTotal)}
+							<span class="flex flex-shrink-0 items-center gap-2">
+								<span class="text-xl font-bold text-gray-800">
+									{formatPrice(total.grandTotal)}
+								</span>
+								{#if !peerStore.isGuest}
+									<button
+										onclick={() => syncedBillStore.setPersonPaid(total.personId, !person?.paid)}
+										class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-colors {person?.paid
+											? 'bg-green-500 text-white hover:bg-green-600'
+											: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+										title={person?.paid ? 'Payment confirmed — click to undo' : 'Mark payment confirmed'}
+									>
+										{#if person?.paid}
+											<span>&#10003;</span> Paid
+										{:else}
+											Mark paid
+										{/if}
+									</button>
+								{:else if person?.paid}
+									<span
+										class="flex items-center gap-1 rounded-lg bg-green-100 px-2 py-1 text-xs font-medium text-green-700"
+										title="Payment confirmed by host"
+									>
+										&#10003; Paid
+									</span>
+								{/if}
 							</span>
 						</div>
 

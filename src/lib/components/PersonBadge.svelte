@@ -7,9 +7,10 @@
 		showRemove?: boolean;
 		onclick?: () => void;
 		onremove?: () => void;
+		ondone?: () => void; // When provided, shows a clickable done toggle
 	}
 
-	let { person, selected = false, showRemove = false, onclick, onremove }: Props = $props();
+	let { person, selected = false, showRemove = false, onclick, onremove, ondone }: Props = $props();
 </script>
 
 <button
@@ -23,6 +24,28 @@
 	<span>{person.name}</span>
 	{#if selected}
 		<span class="text-xs">&#10003;</span>
+	{/if}
+	{#if ondone}
+		<span
+			role="button"
+			tabindex="0"
+			class="ml-1 flex h-4 w-4 items-center justify-center rounded-full text-xs transition-colors {person.done
+				? 'bg-green-500 text-white'
+				: 'bg-black/10 text-gray-500 hover:bg-black/20'}"
+			title={person.done ? `${person.name} is done selecting` : `Mark ${person.name} done`}
+			onclick={(e) => {
+				e.stopPropagation();
+				ondone?.();
+			}}
+			onkeydown={(e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.stopPropagation();
+					ondone?.();
+				}
+			}}
+		>
+			&#10003;
+		</span>
 	{/if}
 	{#if showRemove && onremove}
 		<span

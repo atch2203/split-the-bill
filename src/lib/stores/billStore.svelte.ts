@@ -121,7 +121,9 @@ function addItem(name: string = 'New Item', price: number = 0, quantity: number 
 function removeItem(id: string): void {
 	const index = items.findIndex((item) => item.id === id);
 	if (index !== -1) {
+		const removed = items[index];
 		items.splice(index, 1);
+		clearDoneForPeople(removed.assignedTo);
 		notifyStateChange();
 	}
 }
@@ -129,7 +131,12 @@ function removeItem(id: string): void {
 function updateItem(id: string, updates: Partial<Omit<ReceiptItem, 'id'>>): void {
 	const item = items.find((item) => item.id === id);
 	if (item) {
+		const before = item.assignedTo;
 		Object.assign(item, updates);
+		if (updates.assignedTo) {
+			// Anyone added to or removed from this item had their share change.
+			clearDoneForPeople([...new Set([...before, ...updates.assignedTo])]);
+		}
 		notifyStateChange();
 	}
 }
@@ -168,6 +175,15 @@ function removePerson(id: string): void {
 	notifyStateChange();
 }
 
+// Clear the `done` flag for the given people (their selection changed).
+function clearDoneForPeople(ids: string[]): void {
+	for (const person of people) {
+		if (person.done && ids.includes(person.id)) {
+			person.done = false;
+		}
+	}
+}
+
 function toggleAssignment(itemId: string, personId: string): void {
 	const item = items.find((item) => item.id === itemId);
 	if (!item) return;
@@ -185,6 +201,21 @@ function toggleAssignment(itemId: string, personId: string): void {
 			delete item.portions[personId];
 		}
 	}
+	clearDoneForPeople([personId]);
+	notifyStateChange();
+}
+
+function setPersonDone(personId: string, done: boolean): void {
+	const person = people.find((p) => p.id === personId);
+	if (!person) return;
+	person.done = done;
+	notifyStateChange();
+}
+
+function setPersonPaid(personId: string, paid: boolean): void {
+	const person = people.find((p) => p.id === personId);
+	if (!person) return;
+	person.paid = paid;
 	notifyStateChange();
 }
 
@@ -202,6 +233,7 @@ function toggleMultipart(itemId: string): void {
 		}
 		item.portions = portions;
 	}
+	clearDoneForPeople(item.assignedTo);
 	notifyStateChange();
 }
 
@@ -211,6 +243,7 @@ function setPortion(itemId: string, personId: string, portion: number): void {
 	if (!item.assignedTo.includes(personId)) return;
 	if (!item.portions) item.portions = {};
 	item.portions[personId] = Math.max(1, Math.floor(portion));
+	clearDoneForPeople([personId]);
 	notifyStateChange();
 }
 
@@ -339,6 +372,8 @@ export const billStore = {
 	setItems,
 	addPerson,
 	removePerson,
+	setPersonDone,
+	setPersonPaid,
 	toggleAssignment,
 	toggleMultipart,
 	setPortion,
