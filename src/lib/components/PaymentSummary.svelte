@@ -3,6 +3,7 @@
 	import { identityStore } from '$lib/stores/identityStore.svelte';
 	import { peerStore } from '$lib/stores/peerStore.svelte';
 	import { formatPrice } from '$lib/utils/receiptParser';
+	import { celebrate } from '$lib/utils/celebrate';
 
 	const showGuestDemo = $derived(peerStore.isGuest && identityStore.tourActive);
 	const DEMO_COLOR = '#818cf8';
@@ -61,13 +62,31 @@
 	const allDone = $derived(
 		syncedBillStore.people.length > 0 && syncedBillStore.people.every((p) => p.done)
 	);
+
+	const allPaid = $derived(
+		syncedBillStore.people.length > 0 && syncedBillStore.people.every((p) => p.paid)
+	);
+
+	// Celebrate when everyone's payment gets confirmed (fires on the false→true edge,
+	// for host, guests, and solo alike since `paid` syncs to all).
+	let wasAllPaid = false;
+	$effect(() => {
+		if (allPaid && !wasAllPaid) celebrate();
+		wasAllPaid = allPaid;
+	});
 </script>
 
 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
 	<div class="mb-3">
 		<div class="flex items-center gap-2">
 			<h2 class="text-lg font-semibold text-gray-800">Summary</h2>
-			{#if allDone}
+			{#if allPaid}
+				<span
+					class="flex items-center gap-1 rounded-full bg-green-500 px-2 py-0.5 text-xs font-medium text-white"
+				>
+					🎉 Everyone's paid!
+				</span>
+			{:else if allDone}
 				<span
 					class="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
 				>
