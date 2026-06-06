@@ -99,7 +99,7 @@
 	function generateTextSummary(withAssignments: boolean): string {
 		const lines: string[] = [];
 
-		lines.push('🧾 https://atch2203.github.io/split-the-bill');
+		lines.push('https://stb.atch.dev');
 		const title = (syncedBillStore.settings.title ?? '').trim();
 		if (title) {
 			lines.push('');
@@ -421,7 +421,7 @@
 				` : ''}
 
 				<p style="margin-top: 24px; font-size: 12px; color: #888; text-align: center;">
-					🧾 <a href="https://atch2203.github.io/split-the-bill" style="color: #888;">https://atch2203.github.io/split-the-bill</a>
+					🧾 <a href="https://stb.atch.dev" style="color: #888;">https://stb.atch.dev</a>
 				</p>
 			</body>
 			</html>

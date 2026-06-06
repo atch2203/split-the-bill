@@ -28,7 +28,7 @@ A privacy-focused web app for splitting restaurant bills with friends. Scan or p
 
 ## Try It
 
-**[https://atch2203.github.io/split-the-bill](https://atch2203.github.io/split-the-bill)**
+**[https://stb.atch.dev](https://stb.atch.dev)**
 
 ## Usage
 
