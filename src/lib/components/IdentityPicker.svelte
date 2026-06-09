@@ -56,11 +56,6 @@
 	function changePerson() {
 		identityStore.clear();
 	}
-
-	function toggleDone() {
-		if (!currentPerson) return;
-		syncedBillStore.setPersonDone(currentPerson.id, !currentPerson.done);
-	}
 </script>
 
 {#if currentPerson}
@@ -75,18 +70,6 @@
 			<span class="truncate font-semibold text-gray-800">{currentPerson.name}</span>
 		</div>
 		<div class="flex flex-shrink-0 items-center gap-2">
-			<button
-				onclick={toggleDone}
-				class="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors {currentPerson.done
-					? 'bg-green-100 text-green-700 hover:bg-green-200'
-					: 'bg-blue-500 text-white hover:bg-blue-600'}"
-			>
-				{#if currentPerson.done}
-					<span>&#10003;</span> Done selecting
-				{:else}
-					I'm done selecting
-				{/if}
-			</button>
 			<button
 				onclick={changePerson}
 				class="rounded px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"

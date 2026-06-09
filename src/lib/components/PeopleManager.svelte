@@ -126,7 +126,6 @@
 						{person}
 						showRemove={true}
 						onremove={() => syncedBillStore.removePerson(person.id)}
-						ondone={() => syncedBillStore.setPersonDone(person.id, !person.done)}
 					/>
 				{/each}
 			</div>

@@ -71,7 +71,11 @@
 	// for host, guests, and solo alike since `paid` syncs to all).
 	let wasAllPaid = false;
 	$effect(() => {
-		if (allPaid && !wasAllPaid) celebrate();
+		// Suppress confetti while the host is running the tour (sample data auto-fills
+		// paid state, which would otherwise trigger a celebration on a fake bill).
+		const inHostTour = identityStore.tourActive && !peerStore.isGuest;
+		const enoughPeople = syncedBillStore.people.length > 1;
+		if (allPaid && !wasAllPaid && !inHostTour && enoughPeople) celebrate();
 		wasAllPaid = allPaid;
 	});
 </script>
@@ -91,6 +95,12 @@
 					class="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
 				>
 					&#10003; Everyone's done selecting
+				</span>
+			{:else if syncedBillStore.people.length > 0}
+				<span
+					class="flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700"
+				>
+					Not everyone's done selecting
 				</span>
 			{/if}
 		</div>
@@ -182,12 +192,26 @@
 										style="background-color: {color};"
 									>You</span>
 								{/if}
-								{#if person?.done}
+								{#if !peerStore.isGuest}
+									<button
+										onclick={() => syncedBillStore.setPersonDone(total.personId, !person?.done)}
+										class="flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium transition-colors {person?.done
+											? 'bg-green-100 text-green-700 hover:bg-green-200'
+											: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+										title={person?.done ? 'Done selecting — click to undo' : 'Mark done selecting'}
+									>
+										{#if person?.done}
+											<span>&#10003;</span> Done selecting
+										{:else}
+											Mark done selecting
+										{/if}
+									</button>
+								{:else if person?.done}
 									<span
 										class="flex flex-shrink-0 items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
 										title="Done selecting items"
 									>
-										&#10003; Done
+										&#10003; Done selecting
 									</span>
 								{/if}
 							</span>
@@ -195,21 +219,7 @@
 								<span class="text-xl font-bold text-gray-800">
 									{formatPrice(total.grandTotal)}
 								</span>
-								{#if !peerStore.isGuest}
-									<button
-										onclick={() => syncedBillStore.setPersonPaid(total.personId, !person?.paid)}
-										class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-colors {person?.paid
-											? 'bg-green-500 text-white hover:bg-green-600'
-											: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
-										title={person?.paid ? 'Payment confirmed — click to undo' : 'Mark payment confirmed'}
-									>
-										{#if person?.paid}
-											<span>&#10003;</span> Paid
-										{:else}
-											Mark paid
-										{/if}
-									</button>
-								{:else if person?.paid}
+								{#if person?.paid}
 									<span
 										class="flex items-center gap-1 rounded-lg bg-green-100 px-2 py-1 text-xs font-medium text-green-700"
 										title="Payment confirmed by host"
@@ -267,7 +277,11 @@
 			</div>
 
 			<!-- Verification -->
-			{#if roundingDifference > 0.01}
+			{#if syncedBillStore.unassignedItems.length > 0}
+				<p class="mt-3 text-sm text-yellow-600">
+					Note: Individual totals are short by {formatPrice(roundingDifference)} — not every item has an associated person yet
+				</p>
+			{:else if roundingDifference > 0.01}
 				<p class="mt-3 text-sm text-yellow-600">
 					Note: Individual totals may differ by {formatPrice(roundingDifference)} due to rounding
 				</p>

@@ -644,9 +644,13 @@ function registerCallbacks(
 	getState = getStateCallback;
 }
 
-// Check if currently connected as a guest
+// Check if this user is a guest — someone who joined a host's room.
+// NOT tied to live connection: a guest who drops (canReconnect/reconnecting) must
+// keep the guest UI instead of flipping to the host/solo view. `lastHostId` is set
+// on join and cleared only by exitRoom()/disconnect(), so it tracks guest identity
+// across disconnects. isHost stays true for a dropped host, so they're excluded.
 function isGuest(): boolean {
-	return isConnected && !isHost;
+	return !isHost && lastHostId !== null;
 }
 
 export const peerStore = {

@@ -2,6 +2,8 @@
 	import ReceiptScanner from '$lib/components/ReceiptScanner.svelte';
 	import PeopleManager from '$lib/components/PeopleManager.svelte';
 	import IdentityPicker from '$lib/components/IdentityPicker.svelte';
+	import DoneSelectingButton from '$lib/components/DoneSelectingButton.svelte';
+	import MarkPaidPanel from '$lib/components/MarkPaidPanel.svelte';
 	import ItemList from '$lib/components/ItemList.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 	import PaymentSummary from '$lib/components/PaymentSummary.svelte';
@@ -155,9 +157,6 @@
 		<div data-tour="settings">
 			<SettingsPanel />
 		</div>
-		<div data-tour="payments">
-			<PaymentMethodsPanel />
-		</div>
 		{#if billStore.people.length > 0 && peopleNotDone.length > 0}
 			<div class="flex items-start gap-2 rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800 shadow-sm">
 				<svg class="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -170,9 +169,16 @@
 				</span>
 			</div>
 		{/if}
+		<DoneSelectingButton />
 		<div data-tour="summary">
 			<PaymentSummary />
 		</div>
+		<div data-tour="payments">
+			<PaymentMethodsPanel />
+		</div>
+		{#if !peerStore.isGuest}
+			<MarkPaidPanel />
+		{/if}
 		<div data-tour="export">
 			<ExportImport />
 		</div>
