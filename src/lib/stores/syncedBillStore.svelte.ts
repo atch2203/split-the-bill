@@ -8,12 +8,21 @@ function createSyncedAction<T extends unknown[], R>(
 	localAction: (...args: T) => R
 ): (...args: T) => R | undefined {
 	return (...args: T): R | undefined => {
-		if (peerStore.isGuest) {
-			// Send action to host instead of executing locally
-			peerStore.sendAction(actionName, args);
-			return undefined;
+		// An ACTING/provisional host keeps the guest UI but owns the authoritative
+		// state, so it applies locally (and broadcasts) like a host.
+		if (peerStore.isGuest && !peerStore.isStateAuthority) {
+			// OPTIMISTIC: apply locally immediately for instant feedback, regardless of
+			// connection health. This keeps the UI responsive even in the window BEFORE
+			// an outage is detected (when we still think we're connected) and during it.
+			const result = localAction(...args);
+			// Also relay to the host when one is actually reachable; its full-state
+			// broadcast reconciles our optimistic view (full replace → no duplicates).
+			if (peerStore.canSendToHost) {
+				peerStore.sendAction(actionName, args);
+			}
+			return result;
 		}
-		// Execute locally (host or solo mode)
+		// Execute locally (host, acting host, or solo mode)
 		return localAction(...args);
 	};
 }

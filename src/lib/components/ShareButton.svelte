@@ -47,9 +47,10 @@
 			() => billStore.getState()
 		);
 
-		// Set up broadcast on state changes (only for host)
+		// Set up broadcast on state changes (host, acting host, or provisional host —
+		// whoever currently owns the authoritative state).
 		billStore.setOnStateChange(() => {
-			if (peerStore.isHost) {
+			if (peerStore.isStateAuthority) {
 				peerStore.broadcastState();
 			}
 		});
@@ -107,6 +108,13 @@
 		setTimeout(() => (copied = false), 2000);
 	}
 
+	function takeControl() {
+		// Promote self to a provisional real host and migrate the mesh to us.
+		peerStore.takeControl();
+		isSharing = true;
+		shareUrl = peerStore.getShareUrl();
+	}
+
 	function stopSharing() {
 		peerStore.disconnect();
 		isSharing = false;
@@ -147,6 +155,15 @@
 		>
 			Dismiss
 		</button>
+		{#if peerStore.canTakeControl}
+			<button
+				onclick={takeControl}
+				class="rounded-lg bg-purple-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-purple-600"
+				title="Become the host so the session keeps working"
+			>
+				Take control
+			</button>
+		{/if}
 	</div>
 {:else if showPasscodeSetup}
 	<div class="flex items-center gap-2">
@@ -243,6 +260,15 @@
 			</svg>
 			{peerStore.totalUsers} in session
 		</div>
+		{#if peerStore.canTakeControl}
+			<button
+				onclick={takeControl}
+				class="rounded-lg bg-purple-500 px-3 py-1 text-sm text-white transition-colors hover:bg-purple-600"
+				title="Become the host so the session keeps working"
+			>
+				Take control
+			</button>
+		{/if}
 		<button
 			onclick={stopSharing}
 			class="rounded-lg bg-gray-100 px-2 py-1 text-sm text-gray-600 transition-colors hover:bg-gray-200"
