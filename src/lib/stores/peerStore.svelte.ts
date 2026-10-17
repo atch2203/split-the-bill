@@ -158,6 +158,8 @@ const HOST_SILENCE_MS = 3500; // backstop: declare dead after this much total si
 const ICE_CONFIRM_MS = 1500; // confirm an ICE 'disconnected' before treating it as loss
 const FAILOVER_CONNECT_MS = 5000; // short connect timeout while probing R during failover
 const HANDOFF_WINDOW_MS = 3000;
+const CLAIM_RETRIES = 6; // explicit claims retry while the released id frees up...
+const CLAIM_RETRY_MS = 500; // ...for up to ~3s
 
 let rosterHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -239,8 +241,25 @@ async function createPeer(id?: string): Promise<Peer> {
 			peerId = openId;
 			resolve(newPeer);
 		});
-		newPeer.on('error', (err) => reject(err));
+		newPeer.on('error', (err) => {
+			// Failed before opening (e.g. id taken): don't leave a half-made peer behind.
+			if (!newPeer.open) newPeer.destroy();
+			reject(err);
+		});
 	});
+}
+
+// Bind `id`, retrying while the broker still reports it taken ('unavailable-id').
+async function createPeerWithRetry(id: string, retries: number): Promise<Peer> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await createPeer(id);
+		} catch (err) {
+			const type = (err as { type?: string }).type;
+			if (type !== 'unavailable-id' || attempt >= retries) throw err;
+			await new Promise<void>((r) => setTimeout(r, CLAIM_RETRY_MS));
+		}
+	}
 }
 
 // ===========================================================================
@@ -558,7 +577,7 @@ async function connectOnExistingPeer(
 	passcode: string,
 	timeoutMs: number = 30000
 ): Promise<void> {
-	if (!peer) return joinHost(targetRoomId, passcode, true);
+	if (!peer || peer.destroyed || peer.disconnected) return joinHost(targetRoomId, passcode, true);
 	return establishHostConnection(peer, targetRoomId, passcode, timeoutMs);
 }
 
@@ -783,7 +802,9 @@ function startFailover(immediate: boolean, planned: boolean): void {
 	const gen = ++failoverGen;
 	failoverActive = true;
 
-	const deadline = myClaimDeadlineMs(immediate);
+	// Planned handoff: the claimant may spend its retry window waiting for R to free
+	// up — don't snatch R out from under it.
+	const deadline = myClaimDeadlineMs(immediate) + (planned ? CLAIM_RETRIES * CLAIM_RETRY_MS : 0);
 	if (claimTimer) clearTimeout(claimTimer);
 	claimTimer = setTimeout(() => {
 		claimTimer = null;
@@ -836,15 +857,46 @@ function isStateAuthorityNow(): boolean {
 	return isHost || isActingHost || isProvisionalHost;
 }
 
+// Stop any in-flight failover (claim timer + probe loop) so it can't race a claim.
+function cancelFailover(): void {
+	failoverGen++;
+	failoverActive = false;
+	if (claimTimer) {
+		clearTimeout(claimTimer);
+		claimTimer = null;
+	}
+}
+
 // Bind R and become the host. The PeerJS broker arbitrates races: if R is already
 // taken (another peer won the claim race), fall back to joining as a guest.
+// Single-flight: a second concurrent claim (e.g. failover's claim timer firing while
+// a manual takeover is binding R) would fail, reset our role flags and destroy the
+// R peer we just won — disconnecting the whole room.
+let claimInFlight = false;
 async function claimRoom(role: 'acting' | 'host' | 'provisional'): Promise<void> {
-	if (!roomId) return;
+	if (!roomId || claimInFlight) return;
+	claimInFlight = true;
+	cancelFailover();
 	const claimingState = getState ? getState() : null; // our view to re-assert after binding
-	if (peer) peer.destroy();
+	// Keep our guest peer alive until R is actually won: if the claim fails we rejoin
+	// on it, so our id (and succession rank) survives instead of becoming unranked.
+	const guestPeer = peer;
 	try {
-		const newPeer = await createPeer(roomId);
-		// Won R.
+		let newPeer: Peer;
+		try {
+			// An explicit claim (reclaim/takeover) follows the holder releasing R; the
+			// broker may not have freed the id yet, so retry briefly before giving up.
+			newPeer = await createPeerWithRetry(roomId, role === 'acting' ? 0 : CLAIM_RETRIES);
+		} finally {
+			claimInFlight = false;
+		}
+		// Won R. Drop the old guest peer before taking the role, so its lifecycle
+		// handlers don't mistake its close for losing R.
+		if (guestPeer && guestPeer !== newPeer) {
+			tearingDown = true;
+			guestPeer.destroy();
+			tearingDown = false;
+		}
 		isHost = role !== 'acting';
 		isActingHost = role === 'acting';
 		isProvisionalHost = role === 'provisional';
@@ -863,7 +915,7 @@ async function claimRoom(role: 'acting' | 'host' | 'provisional'): Promise<void>
 		isHost = false;
 		isActingHost = false;
 		isProvisionalHost = false;
-		await joinHost(roomId, lastPasscode, true).catch(() => {
+		await connectOnExistingPeer(roomId, lastPasscode).catch(() => {
 			startFailover(false, false);
 		});
 	}
