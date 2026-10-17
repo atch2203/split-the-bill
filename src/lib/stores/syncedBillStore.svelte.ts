@@ -1,4 +1,4 @@
-import { billStore } from './billStore.svelte';
+import { billStore, generateId } from './billStore.svelte';
 import { peerStore } from './peerStore.svelte';
 import type { ReceiptItem, BillSettings, PaymentMethod } from '$lib/types';
 
@@ -27,6 +27,8 @@ function createSyncedAction<T extends unknown[], R>(
 	};
 }
 
+const syncedAddPerson = createSyncedAction('addPerson', billStore.addPerson);
+
 // Synced actions for peer communication
 export const syncedBillStore = {
 	// Reactive state getters (read-only, always from local store)
@@ -47,7 +49,8 @@ export const syncedBillStore = {
 	removeItem: createSyncedAction('removeItem', billStore.removeItem),
 	updateItem: createSyncedAction('updateItem', billStore.updateItem) as (id: string, updates: Partial<Omit<ReceiptItem, 'id'>>) => void,
 	setItems: createSyncedAction('setItems', billStore.setItems),
-	addPerson: createSyncedAction('addPerson', billStore.addPerson),
+	// Pick the id here so a guest's optimistic person and the host's copy share it.
+	addPerson: (name: string) => syncedAddPerson(name, generateId()),
 	removePerson: createSyncedAction('removePerson', billStore.removePerson),
 	setPersonDone: createSyncedAction('setPersonDone', billStore.setPersonDone),
 	toggleAssignment: createSyncedAction('toggleAssignment', billStore.toggleAssignment),

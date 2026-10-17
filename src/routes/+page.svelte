@@ -15,12 +15,23 @@
 	import Tour from '$lib/components/Tour.svelte';
 	import { billStore } from '$lib/stores/billStore.svelte';
 	import { peerStore } from '$lib/stores/peerStore.svelte';
+	import { identityStore } from '$lib/stores/identityStore.svelte';
 	import icon from "$lib/assets/favicon.png"
 
 	let tourActive = $state(false);
 
 	// People who haven't marked themselves done selecting yet.
 	const peopleNotDone = $derived(billStore.people.filter((p) => !p.done));
+
+	const currentPerson = $derived(
+		identityStore.currentPersonId
+			? billStore.people.find((p) => p.id === identityStore.currentPersonId)
+			: null
+	);
+	// Progressive reveal: pick a name to see the bill; finish selecting to see totals.
+	// The tour shows everything so its callouts have targets.
+	const showBill = $derived(!!currentPerson || tourActive);
+	const showTotals = $derived(!!currentPerson?.done || tourActive);
 </script>
 
 <div class="min-h-screen bg-gray-100">
@@ -148,14 +159,12 @@
 			</div>
 		{/if}
 		<IdentityPicker />
+		{#if showBill}
 		{#if !peerStore.isGuest}
 			<PeopleManager />
 		{/if}
 		<div data-tour="items">
 			<ItemList />
-		</div>
-		<div data-tour="settings">
-			<SettingsPanel />
 		</div>
 		{#if billStore.people.length > 0 && peopleNotDone.length > 0}
 			<div class="flex items-start gap-2 rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800 shadow-sm">
@@ -170,18 +179,26 @@
 			</div>
 		{/if}
 		<DoneSelectingButton />
-		<div data-tour="summary">
-			<PaymentSummary />
-		</div>
+		{#if showTotals}
+			<div data-tour="settings">
+				<SettingsPanel />
+			</div>
+			<div data-tour="summary">
+				<PaymentSummary />
+			</div>
+		{/if}
 		<div data-tour="payments">
 			<PaymentMethodsPanel />
 		</div>
 		{#if !peerStore.isGuest}
 			<MarkPaidPanel />
 		{/if}
-		<div data-tour="export">
-			<ExportImport />
-		</div>
+		{#if showTotals}
+			<div data-tour="export">
+				<ExportImport />
+			</div>
+		{/if}
+		{/if}
 		{/if}
 	</main>
 

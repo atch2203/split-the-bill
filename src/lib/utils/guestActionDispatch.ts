@@ -70,7 +70,14 @@ export function handleGuestAction(action: string, rawArgs: unknown): void {
 			if (!isStr(args[0], MAX_LABEL)) return;
 			const name = trunc(args[0], MAX_LABEL).trim();
 			if (!name) return;
-			billStore.addPerson(name);
+			// Optional guest-chosen id (so the guest's optimistic identity survives sync).
+			// Only accept a well-formed id that isn't already taken.
+			const id = args[1];
+			if (typeof id === 'string' && /^[a-z0-9]{1,16}$/.test(id) && !isPersonId(id)) {
+				billStore.addPerson(name, id);
+			} else {
+				billStore.addPerson(name);
+			}
 			return;
 		}
 

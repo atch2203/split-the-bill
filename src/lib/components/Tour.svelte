@@ -43,14 +43,14 @@
 			hideForGuest: true
 		},
 		{
-			selector: '[data-tour="payments"]',
-			title: 'Payment Methods',
-			body: 'Host adds payment handles (Venmo, Cash App, Zelle, PayPal). Guests see "Pay $X" buttons that open Venmo / Cash App / PayPal pre-filled with the amount they owe.'
-		},
-		{
 			selector: '[data-tour="summary"]',
 			title: 'Summary',
 			body: 'Per-person breakdown. Your card is highlighted with your color and a "You" tag. Your items list below shows what you owe for.'
+		},
+		{
+			selector: '[data-tour="payments"]',
+			title: 'Payment Methods',
+			body: 'Host adds payment handles (Venmo, Cash App, Zelle, PayPal). Guests see "Pay $X" buttons that open Venmo / Cash App / PayPal pre-filled with the amount they owe.'
 		},
 		{
 			selector: '[data-tour="export"]',

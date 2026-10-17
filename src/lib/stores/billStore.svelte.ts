@@ -2,7 +2,7 @@ import type { ReceiptItem, Person, BillSettings, PersonTotal, PaymentMethod } fr
 import { PERSON_COLORS } from '$lib/types';
 
 // Generate unique IDs
-function generateId(): string {
+export function generateId(): string {
 	return Math.random().toString(36).substring(2, 9);
 }
 
@@ -140,9 +140,11 @@ function setItems(newItems: ReceiptItem[]): void {
 	notifyStateChange();
 }
 
-function addPerson(name: string): Person {
+// `id` lets a guest pick the id up front so its optimistic copy and the host's
+// copy match (otherwise the host's sync replaces the guest's selected identity).
+function addPerson(name: string, id: string = generateId()): Person {
 	const newPerson: Person = {
-		id: generateId(),
+		id,
 		name,
 		color: PERSON_COLORS[colorIndex % PERSON_COLORS.length]
 	};

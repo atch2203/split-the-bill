@@ -4,7 +4,6 @@
 	import { peerStore } from '$lib/stores/peerStore.svelte';
 
 	let newName = $state('');
-	let pendingName = $state<string | null>(null);
 	let nameInputElement: HTMLInputElement;
 
 	const currentPerson = $derived(
@@ -25,32 +24,16 @@
 		identityStore.setCurrentPerson(id);
 	}
 
-	function createAndSelect() {
+	function createAndSelect(event?: SubmitEvent) {
+		event?.preventDefault();
 		const name = newName.trim();
 		if (!name) return;
 		if (isDuplicateName) return;
+		// Guests apply this optimistically with the same id the host will use, so the
+		// returned person stays valid after the host's sync.
 		const person = syncedBillStore.addPerson(name);
-		if (person) {
-			identityStore.setCurrentPerson(person.id);
-		} else {
-			// Guest mode: addPerson routes to host; wait for sync to pick up the new person by name
-			pendingName = name;
-		}
+		if (person) identityStore.setCurrentPerson(person.id);
 		newName = '';
-	}
-
-	$effect(() => {
-		if (pendingName) {
-			const match = syncedBillStore.people.find((p) => p.name === pendingName);
-			if (match) {
-				identityStore.setCurrentPerson(match.id);
-				pendingName = null;
-			}
-		}
-	});
-
-	function handleKeydown(event: KeyboardEvent) {
-		if (event.key === 'Enter') createAndSelect();
 	}
 
 	function changePerson() {
@@ -103,25 +86,26 @@
 			</div>
 		{/if}
 
-		<div class="mt-3 flex gap-2">
+		<!-- A form so Enter / the mobile keyboard's Go key submits the same way as the button. -->
+		<form class="mt-3 flex gap-2" onsubmit={createAndSelect}>
 			<input
 				bind:this={nameInputElement}
 				bind:value={newName}
 				type="text"
+				enterkeyhint="go"
 				placeholder="Enter your name..."
 				class="flex-1 rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-1 {isDuplicateName
 					? 'border-red-400 focus:border-red-500 focus:ring-red-500'
 					: 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'}"
-				onkeydown={handleKeydown}
 			/>
 			<button
-				onclick={createAndSelect}
+				type="submit"
 				disabled={!newName.trim() || isDuplicateName}
 				class="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				Join
 			</button>
-		</div>
+		</form>
 		{#if isDuplicateName}
 			<p class="mt-2 text-xs text-red-600">
 				Name already taken. Select existing person above or pick different name.
