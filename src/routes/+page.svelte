@@ -153,12 +153,12 @@
 			</div>
 		{:else}
 			<BillTitle />
+		<IdentityPicker />
 		{#if !peerStore.isGuest}
 			<div data-tour="parse">
 				<ReceiptScanner />
 			</div>
 		{/if}
-		<IdentityPicker />
 		{#if showBill}
 		{#if !peerStore.isGuest}
 			<PeopleManager />
