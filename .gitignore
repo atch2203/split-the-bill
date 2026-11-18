@@ -24,3 +24,4 @@ vite.config.ts.timestamp-*
 
 # Local eval receipts
 /test-receipts
+/static/ort

@@ -1,0 +1,9 @@
+import type { FrameResult } from './session';
+
+/** Message protocol between client.ts and paddle.worker.ts. */
+export type Backend = 'webgpu' | 'wasm';
+export type WorkerRequest = { type: 'init'; base: string } | { type: 'frame'; id: number; bitmap: ImageBitmap };
+export type WorkerResponse =
+	| { type: 'ready'; backend: Backend; alphabet: string[] }
+	| { type: 'result'; id: number; result: FrameResult }
+	| { type: 'error'; id?: number; message: string };

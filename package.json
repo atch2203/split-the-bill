@@ -8,15 +8,17 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"test": "vitest run",
-		"prepare": "svelte-kit sync || echo ''",
+		"prepare": "node scripts/copy-ort.mjs && svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"smoke:ocr": "node scripts/smoke-ocr.mjs"
 	},
 	"dependencies": {
 		"@tailwindcss/vite": "^4.1.18",
 		"@types/canvas-confetti": "^1.9.0",
 		"autoprefixer": "^10.4.23",
 		"canvas-confetti": "^1.9.4",
+		"onnxruntime-web": "1.20.1",
 		"peerjs": "^1.5.5",
 		"postcss": "^8.5.6",
 		"scribe.js-ocr": "^0.9.3",

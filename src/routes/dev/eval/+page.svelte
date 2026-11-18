@@ -2,10 +2,28 @@
 	import { parseReceiptText } from '$lib/utils/receiptParser';
 	import { tesseractEngine } from '$lib/ocr/tesseractEngine';
 	import { scoreParse, type ExpectedReceipt, type Score } from '$lib/ocr/eval/score';
+	import { createOcrClient, type OcrClient } from '$lib/ocr/client';
+	import { assembleRows, rowsToText } from '$lib/ocr/rows';
 
 	interface EvalEngine {
 		name: string;
 		run(files: File[]): Promise<string>;
+	}
+
+	// Lazily created, shared PaddleOCR worker client.
+	let paddle: Promise<OcrClient> | null = null;
+	function getPaddle(): Promise<OcrClient> {
+		paddle ??= createOcrClient().then(
+			(c) => {
+				console.info(`[eval] paddle backend: ${c.backend}`);
+				return c;
+			},
+			(err) => {
+				paddle = null; // allow a retry on the next run
+				throw err;
+			}
+		);
+		return paddle;
 	}
 
 	// Extended with more engines in a later task.
@@ -19,6 +37,15 @@
 				} finally {
 					bitmap.close();
 				}
+			}
+		},
+		{
+			// Temporary single-frame Paddle engine (finalized in Task 8).
+			name: 'paddle-single',
+			async run(files) {
+				const client = await getPaddle();
+				const result = await client.process(await createImageBitmap(files[0]));
+				return rowsToText(assembleRows(result.boxes.map((b) => ({ box: b.box, text: b.text, confidence: 1 }))));
 			}
 		}
 	];
