@@ -1,20 +1,102 @@
 <script lang="ts">
+	import { onDestroy, onMount } from 'svelte';
 	import { billStore } from '$lib/stores/billStore.svelte';
 	import { parseReceiptText } from '$lib/utils/receiptParser';
-	import { tesseractEngine } from '$lib/ocr/tesseractEngine';
+	// Importing client.ts does not start the worker; only createOcrClient() does.
+	import { createOcrClient, type OcrClient } from '$lib/ocr/client';
+	import { ScanSession } from '$lib/ocr/session';
+	import { rowsToText } from '$lib/ocr/rows';
+	import CameraScanner from './CameraScanner.svelte';
 
-	let fileInput: HTMLInputElement;
+	const UNSUPPORTED_ERROR = "Scanning isn't supported on this device";
+
+	let fileInput = $state<HTMLInputElement>();
 	let imagePreview = $state<string | null>(null);
-	let processedPreview = $state<string | null>(null);
 	let isScanning = $state(false);
+	let isLoadingScanner = $state(false);
 	let scanError = $state<string | null>(null);
 	let showRawText = $state(false);
-	let showProcessed = $state(false);
 
 	// Input mode: 'scan' for OCR, 'text' for manual text entry
 	let inputMode = $state<'scan' | 'text'>('text');
 	let manualText = $state('');
 	let showInstructions = $state(false);
+
+	// Live camera scanning: set after mount so SSR/prerender markup matches hydration.
+	let cameraSupported = $state(false);
+	let cameraClient = $state<OcrClient | null>(null);
+
+	/** Lazily created on first user action; shared by camera and upload. */
+	let clientPromise: Promise<OcrClient> | null = null;
+	let destroyed = false;
+
+	onMount(() => {
+		cameraSupported = !!navigator.mediaDevices?.getUserMedia;
+	});
+
+	onDestroy(() => {
+		destroyed = true;
+		dropClient();
+	});
+
+	function getClient(): Promise<OcrClient> {
+		clientPromise ??= createOcrClient();
+		return clientPromise;
+	}
+
+	/** Disposes the current client (now or once it loads) so the next use starts fresh. */
+	function dropClient() {
+		clientPromise?.then(
+			(c) => c.dispose(),
+			() => {}
+		);
+		clientPromise = null;
+	}
+
+	/** Load failure, or a fatal error from the camera scanner. */
+	function scannerUnsupported() {
+		dropClient();
+		cameraClient = null;
+		scanError = UNSUPPORTED_ERROR;
+		inputMode = 'text';
+	}
+
+	/** Resolves the client with the `Loading scanner…` state; null if it failed to load. */
+	async function loadClient(): Promise<OcrClient | null> {
+		isLoadingScanner = true;
+		try {
+			return await getClient();
+		} catch (err) {
+			console.error('[OCR] Scanner failed to load:', err);
+			if (!destroyed) scannerUnsupported();
+			return null;
+		} finally {
+			isLoadingScanner = false;
+		}
+	}
+
+	async function startCamera() {
+		if (isLoadingScanner || isScanning || cameraClient) return;
+		scanError = null;
+		const client = await loadClient();
+		if (!client || destroyed || inputMode !== 'scan') return;
+		cameraClient = client;
+	}
+
+	function handleCameraFinish(text: string) {
+		cameraClient = null;
+		applyOcrText(text);
+	}
+
+	function handleCameraCancel(message?: string) {
+		cameraClient = null;
+		scanError = message ?? null;
+	}
+
+	function handleCameraFatal(message: string) {
+		console.error('[OCR] Camera scanner fatal:', message);
+		scannerUnsupported();
+	}
 
 	async function handleFileSelect(event: Event) {
 		const input = event.target as HTMLInputElement;
@@ -22,6 +104,7 @@
 		if (!file) return;
 
 		// Show preview
+		if (imagePreview) URL.revokeObjectURL(imagePreview);
 		imagePreview = URL.createObjectURL(file);
 		scanError = null;
 
@@ -32,55 +115,68 @@
 	async function scanImage(file: File) {
 		console.log('[OCR] Starting scan...');
 		console.log('[OCR] File:', file.name, 'Type:', file.type, 'Size:', file.size, 'bytes');
+		const client = await loadClient();
+		if (!client || destroyed) return;
+
 		isScanning = true;
 		scanError = null;
-
+		let text: string;
+		let bitmap: ImageBitmap | null = null;
 		try {
-			const bitmap = await createImageBitmap(file);
-			tesseractEngine.onPreprocessed = (url) => (processedPreview = url);
-			const text = await tesseractEngine.recognize(bitmap);
-			bitmap.close();
-
-
-			console.log('[OCR] Extracted text length:', text.length);
-			console.log('[OCR] Raw text:\n', text);
-
-			// Store raw OCR text
-			billStore.setRawOcrText(text);
-
-			// Parse the text into items
-			console.log('[OCR] Parsing text into items...');
-			const parseResult = parseReceiptText(text);
-			console.log('[OCR] Parse result:', parseResult);
-
-			if (parseResult.items.length > 0) {
-				billStore.setItems(parseResult.items);
-				console.log('[OCR] Items set in store');
-
-				// Auto-fill tax and tip if detected
-				const settingsUpdate: { taxAmount?: number; tipAmount?: number } = {};
-				if (parseResult.taxAmount !== null) {
-					settingsUpdate.taxAmount = parseResult.taxAmount;
-					console.log('[OCR] Tax auto-filled:', parseResult.taxAmount);
-				}
-				if (parseResult.tipAmount !== null) {
-					settingsUpdate.tipAmount = parseResult.tipAmount;
-					console.log('[OCR] Tip auto-filled:', parseResult.tipAmount);
-				}
-				if (Object.keys(settingsUpdate).length > 0) {
-					billStore.updateSettings(settingsUpdate);
-				}
-			} else {
-				scanError = 'No items found in receipt. Try adding items manually.';
-				console.log('[OCR] No items found');
-			}
+			bitmap = await createImageBitmap(file);
+			// `process` consumes (closes) the bitmap.
+			const result = await client.process(bitmap);
+			const session = new ScanSession(client.alphabet, { tracker: { confirmFrames: 1 } });
+			session.addFrame(result, 0);
+			text = rowsToText(session.rows());
 		} catch (err) {
 			console.error('[OCR] Error:', err);
 			console.error('[OCR] Error stack:', err instanceof Error ? err.stack : 'N/A');
 			scanError = `Failed to scan receipt: ${err instanceof Error ? err.message : 'Unknown error'}`;
+			// A `process` failure may mean the worker died: start a fresh one next time.
+			// (A bad image file fails in createImageBitmap and keeps the client.)
+			if (bitmap) dropClient();
+			return;
 		} finally {
 			isScanning = false;
 			console.log('[OCR] Scan complete');
+		}
+		if (destroyed) return;
+		applyOcrText(text);
+	}
+
+	function applyOcrText(text: string) {
+		console.log('[OCR] Extracted text length:', text.length);
+		console.log('[OCR] Raw text:\n', text);
+
+		// Store raw OCR text
+		billStore.setRawOcrText(text);
+
+		// Parse the text into items
+		console.log('[OCR] Parsing text into items...');
+		const parseResult = parseReceiptText(text);
+		console.log('[OCR] Parse result:', parseResult);
+
+		if (parseResult.items.length > 0) {
+			billStore.setItems(parseResult.items);
+			console.log('[OCR] Items set in store');
+
+			// Auto-fill tax and tip if detected
+			const settingsUpdate: { taxAmount?: number; tipAmount?: number } = {};
+			if (parseResult.taxAmount !== null) {
+				settingsUpdate.taxAmount = parseResult.taxAmount;
+				console.log('[OCR] Tax auto-filled:', parseResult.taxAmount);
+			}
+			if (parseResult.tipAmount !== null) {
+				settingsUpdate.tipAmount = parseResult.tipAmount;
+				console.log('[OCR] Tip auto-filled:', parseResult.tipAmount);
+			}
+			if (Object.keys(settingsUpdate).length > 0) {
+				billStore.updateSettings(settingsUpdate);
+			}
+		} else {
+			scanError = 'No items found in receipt. Try adding items manually.';
+			console.log('[OCR] No items found');
 		}
 	}
 
@@ -140,7 +236,10 @@
 			Scan Image (Flash Recommended)
 		</button>
 		<button
-			onclick={() => (inputMode = 'text')}
+			onclick={() => {
+				inputMode = 'text';
+				cameraClient = null; // unmounts the camera scanner, stopping the stream
+			}}
 			class="flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors {inputMode === 'text'
 				? 'bg-white text-gray-900 shadow-sm'
 				: 'text-gray-600 hover:text-gray-900'}"
@@ -151,42 +250,64 @@
 
 	<div class="space-y-3">
 		{#if inputMode === 'scan'}
-			<!-- File Input -->
-			<div class="flex gap-2">
-				<label
-					class="flex-1 cursor-pointer rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center transition-colors hover:border-blue-400 hover:bg-blue-50"
-				>
-					<input
-						bind:this={fileInput}
-						type="file"
-						accept="image/*"
-						capture="environment"
-						class="hidden"
-						onchange={handleFileSelect}
-					/>
-					<div class="text-gray-600">
-						{#if isScanning}
-							<span class="inline-block animate-spin">&#x21bb;</span> Scanning...
-						{:else}
-							<span class="text-2xl">&#128247;</span>
-							<p class="mt-1 text-sm">Tap to take photo or choose image</p>
-						{/if}
-					</div>
-				</label>
-
-				{#if imagePreview}
-					<button
-						onclick={clearImage}
-						class="rounded-lg border border-gray-300 px-3 py-2 text-gray-600 transition-colors hover:bg-gray-100"
-						title="Clear image"
+			{#if cameraClient}
+				<CameraScanner
+					client={cameraClient}
+					onfinish={handleCameraFinish}
+					oncancel={handleCameraCancel}
+					onfatal={handleCameraFatal}
+				/>
+			{:else if isLoadingScanner}
+				<div class="rounded-lg border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
+					<span class="inline-block animate-spin">&#x21bb;</span> Loading scanner…
+				</div>
+			{:else}
+				<div class="flex gap-2">
+					{#if cameraSupported}
+						<button
+							onclick={startCamera}
+							disabled={isScanning}
+							class="flex-1 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50"
+						>
+							<span class="text-2xl">&#127909;</span>
+							<p class="mt-1 text-sm">Use camera</p>
+						</button>
+					{/if}
+					<label
+						class="flex-1 cursor-pointer rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center transition-colors hover:border-blue-400 hover:bg-blue-50"
 					>
-						&#x2715;
-					</button>
-				{/if}
-			</div>
+						<input
+							bind:this={fileInput}
+							type="file"
+							accept="image/*"
+							class="hidden"
+							disabled={isScanning}
+							onchange={handleFileSelect}
+						/>
+						<div class="text-gray-600">
+							{#if isScanning}
+								<span class="inline-block animate-spin">&#x21bb;</span> Scanning...
+							{:else}
+								<span class="text-2xl">&#128247;</span>
+								<p class="mt-1 text-sm">Upload photo</p>
+							{/if}
+						</div>
+					</label>
+
+					{#if imagePreview}
+						<button
+							onclick={clearImage}
+							class="rounded-lg border border-gray-300 px-3 py-2 text-gray-600 transition-colors hover:bg-gray-100"
+							title="Clear image"
+						>
+							&#x2715;
+						</button>
+					{/if}
+				</div>
+			{/if}
 
 			<!-- Image Preview -->
-			{#if imagePreview}
+			{#if imagePreview && !cameraClient}
 				<div class="relative overflow-hidden rounded-lg border border-gray-200">
 					<img src={imagePreview} alt="Receipt preview" class="max-h-48 w-full object-contain" />
 					{#if isScanning}
@@ -239,27 +360,6 @@
 		{#if scanError}
 			<div class="rounded-lg bg-red-50 p-3 text-sm text-red-700">
 				{scanError}
-			</div>
-		{/if}
-
-		<!-- Processed Image Preview -->
-		{#if processedPreview}
-			<div>
-				<button
-					onclick={() => (showProcessed = !showProcessed)}
-					class="flex w-full items-center justify-between rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200"
-				>
-					<span>Processed Image (what OCR sees)</span>
-					<span class="text-xs">{showProcessed ? '▲' : '▼'}</span>
-				</button>
-
-				{#if showProcessed}
-					<img
-						src={processedPreview}
-						alt="Processed receipt"
-						class="mt-2 max-h-64 w-full rounded-lg border border-gray-200 object-contain"
-					/>
-				{/if}
 			</div>
 		{/if}
 

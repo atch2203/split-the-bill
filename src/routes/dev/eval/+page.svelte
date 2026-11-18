@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { parseReceiptText } from '$lib/utils/receiptParser';
-	import { tesseractEngine } from '$lib/ocr/tesseractEngine';
 	import { scoreParse, type ExpectedReceipt, type Score } from '$lib/ocr/eval/score';
 	import { createOcrClient, type OcrClient } from '$lib/ocr/client';
 	import { rowsToText } from '$lib/ocr/rows';
@@ -43,17 +42,6 @@
 	}
 
 	const engines: EvalEngine[] = [
-		{
-			name: tesseractEngine.name,
-			async run(files) {
-				const bitmap = await createImageBitmap(files[0]);
-				try {
-					return await tesseractEngine.recognize(bitmap);
-				} finally {
-					bitmap.close();
-				}
-			}
-		},
 		{
 			name: 'paddle-single',
 			async run(files) {
