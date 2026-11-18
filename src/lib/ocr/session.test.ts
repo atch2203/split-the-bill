@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ScanSession, type FrameResult } from './session';
+import { ScanSession, type FrameResult, type SessionStatus } from './session';
 import type { FrameBox } from './tracker';
 import { ALPHABET, obs } from './testUtils';
 
@@ -21,6 +21,7 @@ describe('ScanSession', () => {
 		let st = s.addFrame(frame(three()), 0);
 		for (let t = 100; t <= 400; t += 100) st = s.addFrame(frame(three()), t);
 		expect(st.confirmed).toBe(3);
+		expect(st.locked).toBe(st.confirmed);
 		expect(st.done).toBe(false);
 		st = s.addFrame(frame(three()), 1500);
 		expect(st.done).toBe(true);
@@ -43,13 +44,22 @@ describe('ScanSession', () => {
 
 	it('empty frames never finish', () => {
 		const s = new ScanSession(ALPHABET);
-		let st;
+		let st: SessionStatus | undefined;
 		expect(s.rows()).toEqual([]);
 		expect(s.tracks()).toEqual([]);
 		for (let i = 0; i < 10; i++) st = s.addFrame(frame([]), i * 500);
 		expect(st!.done).toBe(false);
 		expect(st!.tooSmall).toBe(false);
 		expect(s.rows()).toEqual([]);
+	});
+
+	it('single-frame path yields rows with confirmFrames 1', () => {
+		const s = new ScanSession(ALPHABET, { tracker: { confirmFrames: 1 } });
+		const st = s.addFrame(frame([fb(50, 24, 'BURGER 12.99'), fb(100, 24, 'COLA 2.00')]), 0);
+		expect(st.confirmed).toBe(2);
+		const rows = s.rows();
+		expect(rows.length).toBe(2);
+		expect(rows.map((r) => r.text)).toEqual(['BURGER 12.99', 'COLA 2.00']);
 	});
 
 	it('flags small text', () => {
