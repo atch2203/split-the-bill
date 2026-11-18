@@ -148,11 +148,14 @@ export class Tracker {
 			if (t.seen >= c.confirmFrames) t.confirmed = true;
 		}
 
-		// Unmatched boxes: ignore split/merge fragments, else start new tracks.
+		// Unmatched boxes: ignore split/merge fragments of tracks from earlier
+		// frames, else start new tracks. Boxes of the same frame never suppress
+		// each other (a short price mostly inside a neighbour's box is real).
+		const prior = this._tracks.slice();
 		boxes.forEach((b, bi) => {
 			if (usedB.has(bi)) return;
 			const ab = area(b.box);
-			for (const t of this._tracks) {
+			for (const t of prior) {
 				const tb = shifted(t.box);
 				const i = intersection(b.box, tb);
 				if (i >= c.containFrac * ab || i >= c.containFrac * area(tb)) return;

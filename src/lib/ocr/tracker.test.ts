@@ -64,6 +64,14 @@ describe('Tracker', () => {
 		expect(final[0].profile.readout()).toBe('BURGER  12.99');
 	});
 
+	it('keeps overlapping boxes of the same frame as separate tracks', () => {
+		const t = new Tracker(ALPHABET, 640, 480, { confirmFrames: 1 });
+		// 40-px box with 32 px (80%) inside the 300-px box, as from unclipped det boxes.
+		t.update([fb(10, 100, 300, 20, 'BURGER'), fb(278, 100, 40, 20, '12')]);
+		expect(t.tracks.length).toBe(2);
+		expect(t.finalTracks().map((k) => k.profile.readout())).toEqual(['BURGER', '12']);
+	});
+
 	it('handles empty frames', () => {
 		const t = new Tracker(ALPHABET, 640, 480);
 		expect(() => t.update([])).not.toThrow();
