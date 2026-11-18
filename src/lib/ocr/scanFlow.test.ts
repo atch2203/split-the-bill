@@ -19,6 +19,34 @@ describe('ScanFlow errors', () => {
 	});
 });
 
+describe('ScanFlow worker deaths', () => {
+	it('first death recovers, second death in the same scan is fatal', () => {
+		const f = new ScanFlow();
+		expect(f.onWorkerDeath()).toBe('recover');
+		f.onFrameOk();
+		expect(f.onWorkerDeath()).toBe('fatal');
+	});
+	it('deaths count across parts of one scan', () => {
+		const f = new ScanFlow();
+		expect(f.onWorkerDeath()).toBe('recover');
+		f.endPart([]);
+		f.nextPart();
+		expect(f.onWorkerDeath()).toBe('fatal');
+	});
+	it('a death resets the live-error count (error, death, error is not fatal)', () => {
+		const f = new ScanFlow();
+		expect(f.onFrameError()).toBe('retry');
+		expect(f.onWorkerDeath()).toBe('recover');
+		expect(f.onFrameError()).toBe('retry');
+	});
+	it('live errors on the fresh worker are unchanged: 2 consecutive are fatal', () => {
+		const f = new ScanFlow();
+		f.onWorkerDeath();
+		expect(f.onFrameError()).toBe('retry');
+		expect(f.onFrameError()).toBe('fatal');
+	});
+});
+
 describe('ScanFlow parts', () => {
 	it('starts at part 1 with no rows', () => {
 		const f = new ScanFlow();

@@ -41,6 +41,7 @@ async function degrade(img: ImageBitmap, p: SynthParams): Promise<ImageBitmap> {
 	g.save();
 	g.translate(W / 2 + p.dx * W, H / 2 + p.dy * H);
 	g.rotate((p.rotateDeg * Math.PI) / 180);
+	// ctx.filter is a no-op on Safari (no blur/brightness): run the eval in Chrome or Firefox.
 	g.filter = `blur(${p.blurPx}px) brightness(${p.brightness})`;
 	g.drawImage(img, -W / 2, -H / 2);
 	g.restore();

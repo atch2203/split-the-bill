@@ -4,6 +4,7 @@
 	import { createOcrClient, type OcrClient } from '$lib/ocr/client';
 	import { rowsToText } from '$lib/ocr/rows';
 	import { ScanSession } from '$lib/ocr/session';
+	import { UPLOAD_DET_MAX_SIDE } from '$lib/ocr/paddlePre';
 	import { synthFrames } from '$lib/ocr/eval/synth';
 	import { replayFrames, type Recording } from '$lib/ocr/eval/replay';
 	import { hash } from '$lib/ocr/eval/rng';
@@ -46,7 +47,9 @@
 			name: 'paddle-single',
 			async run(files) {
 				const client = await getPaddle();
-				const result = await client.process(await createImageBitmap(files[0]));
+				// Same settings as the upload path in ReceiptScanner.
+				const bitmap = await createImageBitmap(files[0], { imageOrientation: 'from-image' });
+				const result = await client.process(bitmap, { detMaxSide: UPLOAD_DET_MAX_SIDE });
 				const session = new ScanSession(client.alphabet, { tracker: { confirmFrames: 1 } });
 				session.addFrame(result, 0);
 				return rowsToText(session.rows());

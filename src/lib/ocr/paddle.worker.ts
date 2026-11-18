@@ -2,11 +2,11 @@
  * PaddleOCR (PP-OCRv5 mobile det + English rec) in a Web Worker on
  * onnxruntime-web. Protocol:
  *   in:  {type:'init', base}            out: {type:'ready', backend, alphabet} | {type:'error', message}
- *   in:  {type:'frame', id, bitmap}     out: {type:'result', id, result}      | {type:'error', id, message}
+ *   in:  {type:'frame', id, bitmap, opts?} out: {type:'result', id, result}      | {type:'error', id, message}
  */
 import * as ort from 'onnxruntime-web/webgpu';
 import { parseDict, recognizeFrame, REC_HEIGHT, REC_MIN_WIDTH, type RunModel } from './paddlePre';
-import type { Backend, WorkerRequest, WorkerResponse } from './paddleProtocol';
+import type { Backend, ProcessOptions, WorkerRequest, WorkerResponse } from './paddleProtocol';
 import type { FrameResult } from './session';
 
 // Typed minimally so this file type-checks under the DOM lib used by the app.
@@ -87,7 +87,7 @@ async function init(base: string) {
 	post({ type: 'ready', backend, alphabet });
 }
 
-async function processFrame(bitmap: ImageBitmap): Promise<FrameResult> {
+async function processFrame(bitmap: ImageBitmap, opts: ProcessOptions = {}): Promise<FrameResult> {
 	const { width: W, height: H } = bitmap;
 	try {
 		if (!models) throw new Error('worker not initialized');
@@ -96,7 +96,7 @@ async function processFrame(bitmap: ImageBitmap): Promise<FrameResult> {
 		if (!c2d) throw new Error('OffscreenCanvas 2d context unavailable');
 		c2d.drawImage(bitmap, 0, 0);
 		const { data } = c2d.getImageData(0, 0, W, H);
-		return await recognizeFrame(data, W, H, models.det, models.rec, models.alphabet);
+		return await recognizeFrame(data, W, H, models.det, models.rec, models.alphabet, opts);
 	} finally {
 		bitmap.close();
 	}
@@ -113,7 +113,7 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
 			}
 		} else if (msg.type === 'frame') {
 			try {
-				post({ type: 'result', id: msg.id, result: await processFrame(msg.bitmap) });
+				post({ type: 'result', id: msg.id, result: await processFrame(msg.bitmap, msg.opts) });
 			} catch (err) {
 				post({ type: 'error', id: msg.id, message: errMessage(err) });
 			}

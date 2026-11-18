@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	DET_MAX_SIDE,
+	UPLOAD_DET_MAX_SIDE,
 	REC_HEIGHT,
 	REC_MIN_WIDTH,
 	REC_MAX_WIDTH,
@@ -41,6 +42,19 @@ describe('detResizeDims', () => {
 	});
 	it('does not upscale small images beyond rounding', () => {
 		expect(detResizeDims(320, 100)).toEqual({ w: 320, h: 96 });
+	});
+	it('honours a larger maxSide (uploads), keeping multiples of 32', () => {
+		expect(detResizeDims(4000, 3000, UPLOAD_DET_MAX_SIDE)).toEqual({ w: 2560, h: 1920 });
+		expect(detResizeDims(3024, 4032, UPLOAD_DET_MAX_SIDE)).toEqual({ w: 1920, h: 2560 });
+		// Below the cap: only rounded, never upscaled.
+		expect(detResizeDims(1920, 1080, UPLOAD_DET_MAX_SIDE)).toEqual({ w: 1920, h: 1088 });
+		const d = detResizeDims(4001, 2999, UPLOAD_DET_MAX_SIDE);
+		expect(d.w % 32).toBe(0);
+		expect(d.h % 32).toBe(0);
+		expect(Math.max(d.w, d.h)).toBeLessThanOrEqual(UPLOAD_DET_MAX_SIDE);
+	});
+	it('defaults to DET_MAX_SIDE', () => {
+		expect(detResizeDims(4000, 3000)).toEqual(detResizeDims(4000, 3000, DET_MAX_SIDE));
 	});
 });
 
@@ -119,5 +133,21 @@ describe('recognizeFrame', () => {
 		expect(res.boxes[0].dists).toHaveLength(2);
 		expect(res.boxes[0].box.x).toBeLessThan(8);
 		expect(recDims[0].slice(0, 3)).toEqual([1, 3, REC_HEIGHT]);
+	});
+
+	it('passes detMaxSide through to the det input size', async () => {
+		const detDims: number[][] = [];
+		const det: RunModel = async (_x, dims) => {
+			detDims.push([...dims]);
+			return { data: new Float32Array(dims[2] * dims[3]), dims: [1, 1, dims[2], dims[3]] };
+		};
+		const rec: RunModel = async () => ({ data: new Float32Array(4), dims: [1, 1, 4] });
+		const img = solid(2048, 1024, [255, 255, 255]);
+		await recognizeFrame(img, 2048, 1024, det, rec, ['A']);
+		await recognizeFrame(img, 2048, 1024, det, rec, ['A'], { detMaxSide: 2560 });
+		expect(detDims).toEqual([
+			[1, 3, 480, 960],
+			[1, 3, 1024, 2048]
+		]);
 	});
 });

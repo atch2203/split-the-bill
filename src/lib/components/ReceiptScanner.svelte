@@ -6,6 +6,7 @@
 	import { createOcrClient, type OcrClient } from '$lib/ocr/client';
 	import { ScanSession, type FrameResult } from '$lib/ocr/session';
 	import { ProcessErrorCounter } from '$lib/ocr/scanFlow';
+	import { UPLOAD_DET_MAX_SIDE } from '$lib/ocr/paddlePre';
 	import { rowsToText } from '$lib/ocr/rows';
 	import CameraScanner from './CameraScanner.svelte';
 
@@ -25,7 +26,8 @@
 
 	// Live camera scanning: set after mount so SSR/prerender markup matches hydration.
 	let cameraSupported = $state(false);
-	let cameraClient = $state<OcrClient | null>(null);
+	/** The camera scanner is mounted (it loads the client itself, after the camera is granted). */
+	let cameraOpen = $state(false);
 
 	/** Lazily created on first user action; shared by camera and upload. */
 	let clientPromise: Promise<OcrClient> | null = null;
@@ -60,7 +62,7 @@
 	function scannerUnsupported() {
 		dropClient();
 		uploadErrors.onOk(); // a later retry starts with a fresh count
-		cameraClient = null;
+		cameraOpen = false;
 		scanError = UNSUPPORTED_ERROR;
 		inputMode = 'text';
 	}
@@ -79,21 +81,19 @@
 		}
 	}
 
-	async function startCamera() {
-		if (isLoadingScanner || isScanning || cameraClient) return;
+	function startCamera() {
+		if (isLoadingScanner || isScanning || cameraOpen) return;
 		scanError = null;
-		const client = await loadClient();
-		if (!client || destroyed || inputMode !== 'scan') return;
-		cameraClient = client;
+		cameraOpen = true;
 	}
 
 	function handleCameraFinish(text: string) {
-		cameraClient = null;
+		cameraOpen = false;
 		applyOcrText(text);
 	}
 
 	function handleCameraCancel(message?: string) {
-		cameraClient = null;
+		cameraOpen = false;
 		scanError = message ?? null;
 	}
 
@@ -128,7 +128,8 @@
 		try {
 			let bitmap: ImageBitmap;
 			try {
-				bitmap = await createImageBitmap(file);
+				// Honour EXIF orientation (rotated phone photos).
+				bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
 			} catch (err) {
 				// Bad image file: not a scanner problem, keep the client.
 				reportScanError(err);
@@ -136,15 +137,17 @@
 			}
 			let result: FrameResult;
 			try {
-				// `process` consumes (closes) the bitmap.
-				result = await client.process(bitmap);
+				// `process` consumes (closes) the bitmap. Uploads get a larger det
+				// resolution than camera frames: small text on big photos survives.
+				result = await client.process(bitmap, { detMaxSide: UPLOAD_DET_MAX_SIDE });
 			} catch (err) {
 				reportScanError(err);
 				if (destroyed) return;
 				if (uploadErrors.onError() === 'fatal') {
 					scannerUnsupported();
 				} else {
-					// The worker may have died: start a fresh one next time.
+					// The worker may have died (dead-client error) or be unhealthy:
+					// drop it so the next upload starts a fresh one.
 					dropClient();
 				}
 				return;
@@ -265,7 +268,7 @@
 		<button
 			onclick={() => {
 				inputMode = 'text';
-				cameraClient = null; // unmounts the camera scanner, stopping the stream
+				cameraOpen = false; // unmounts the camera scanner, stopping the stream
 			}}
 			class="flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors {inputMode === 'text'
 				? 'bg-white text-gray-900 shadow-sm'
@@ -277,9 +280,10 @@
 
 	<div class="space-y-3">
 		{#if inputMode === 'scan'}
-			{#if cameraClient}
+			{#if cameraOpen}
 				<CameraScanner
-					client={cameraClient}
+					{getClient}
+					onclientdead={dropClient}
 					onfinish={handleCameraFinish}
 					oncancel={handleCameraCancel}
 					onfatal={handleCameraFatal}
@@ -334,7 +338,7 @@
 			{/if}
 
 			<!-- Image Preview -->
-			{#if imagePreview && !cameraClient}
+			{#if imagePreview && !cameraOpen}
 				<div class="relative overflow-hidden rounded-lg border border-gray-200">
 					<img src={imagePreview} alt="Receipt preview" class="max-h-48 w-full object-contain" />
 					{#if isScanning}

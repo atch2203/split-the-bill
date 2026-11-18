@@ -7,7 +7,10 @@ import { detPostprocess } from './detPost';
 import type { FrameResult } from './session';
 import type { Box, FrameBox } from './tracker';
 
+/** Default det long-side cap (camera frames; also the smoke script). */
 export const DET_MAX_SIDE = 960;
+/** Det long-side cap for single photo uploads: phone photos keep small text legible. */
+export const UPLOAD_DET_MAX_SIDE = 2560;
 export const DET_MEAN = [0.485, 0.456, 0.406] as const;
 export const DET_STD = [0.229, 0.224, 0.225] as const;
 export const REC_HEIGHT = 48;
@@ -29,9 +32,9 @@ export function parseDict(text: string): string[] {
 	return [...lines, ' '];
 }
 
-/** Long side <= 960 (never upscaled), both sides rounded to multiples of 32 (min 32). */
-export function detResizeDims(w: number, h: number): { w: number; h: number } {
-	const ratio = Math.min(1, DET_MAX_SIDE / Math.max(w, h));
+/** Long side <= `maxSide` (never upscaled), both sides rounded to multiples of 32 (min 32). */
+export function detResizeDims(w: number, h: number, maxSide = DET_MAX_SIDE): { w: number; h: number } {
+	const ratio = Math.min(1, maxSide / Math.max(w, h));
 	const r32 = (v: number) => Math.max(32, Math.round((v * ratio) / 32) * 32);
 	return { w: r32(w), h: r32(h) };
 }
@@ -96,8 +99,13 @@ function sampleToBgrPlanes(
 }
 
 /** Det model input: resized, ImageNet-normalized (mean/std indexed by BGR channel), NCHW. */
-export function detInput(rgba: ArrayLike<number>, W: number, H: number): { data: Float32Array; w: number; h: number } {
-	const { w, h } = detResizeDims(W, H);
+export function detInput(
+	rgba: ArrayLike<number>,
+	W: number,
+	H: number,
+	maxSide = DET_MAX_SIDE
+): { data: Float32Array; w: number; h: number } {
+	const { w, h } = detResizeDims(W, H, maxSide);
 	const data = sampleToBgrPlanes(rgba, W, H, { x: 0, y: 0, w: W, h: H }, w, h, w, (v, c) => (v / 255 - DET_MEAN[c]) / DET_STD[c]);
 	return { data, w, h };
 }
@@ -132,9 +140,10 @@ export async function recognizeFrame(
 	H: number,
 	det: RunModel,
 	rec: RunModel,
-	alphabet: string[]
+	alphabet: string[],
+	opts: { detMaxSide?: number } = {}
 ): Promise<FrameResult> {
-	const d = detInput(rgba, W, H);
+	const d = detInput(rgba, W, H, opts.detMaxSide);
 	const prob = await det(d.data, [1, 3, d.h, d.w]);
 	const [, , ph, pw] = prob.dims;
 	if (prob.dims.length !== 4 || ph !== d.h || pw !== d.w) {

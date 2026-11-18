@@ -1,12 +1,32 @@
-import type { Backend, WorkerRequest, WorkerResponse } from './paddleProtocol';
+import type { Backend, ProcessOptions, WorkerRequest, WorkerResponse } from './paddleProtocol';
 import type { FrameResult } from './session';
 
 export interface OcrClient {
 	alphabet: string[];
 	backend: Backend;
-	/** OCR one frame. The bitmap is transferred to the worker (unusable afterwards) and closed there. */
-	process(frame: ImageBitmap): Promise<FrameResult>;
+	/**
+	 * OCR one frame. The bitmap is transferred to the worker (unusable afterwards) and closed there.
+	 * Rejects with `OcrClientDeadError` once the worker has died or the client was disposed.
+	 */
+	process(frame: ImageBitmap, opts?: ProcessOptions): Promise<FrameResult>;
 	dispose(): void;
+}
+
+/**
+ * Rejection reason for every `process()` call that fails because the client is
+ * dead (worker crashed, message error, or disposed). A fresh client may work;
+ * any other rejection is a per-frame error on a live worker.
+ */
+export class OcrClientDeadError extends Error {
+	readonly code = 'client-dead';
+	constructor(message: string) {
+		super(message);
+		this.name = 'OcrClientDeadError';
+	}
+}
+
+export function isClientDead(err: unknown): err is OcrClientDeadError {
+	return err instanceof OcrClientDeadError;
 }
 
 /** The subset of `Worker` the client uses (lets tests inject a fake). */
@@ -28,21 +48,21 @@ export function connectOcrClient(worker: WorkerLike, base: string): Promise<OcrC
 	const pending = new Map<number, { resolve: (r: FrameResult) => void; reject: (e: Error) => void }>();
 	let nextId = 1;
 	/** Set once the client can no longer process frames (disposed or worker died). */
-	let dead: Error | null = null;
+	let dead: OcrClientDeadError | null = null;
 
 	const kill = (err: Error) => {
 		if (!dead) {
-			dead = err;
+			dead = err instanceof OcrClientDeadError ? err : new OcrClientDeadError(err.message);
 			worker.terminate();
 		}
-		for (const p of pending.values()) p.reject(err);
+		for (const p of pending.values()) p.reject(dead);
 		pending.clear();
 	};
 
 	return new Promise<OcrClient>((resolveInit, rejectInit) => {
 		const fatal = (err: Error) => {
 			kill(err);
-			rejectInit(err); // no-op once resolved
+			rejectInit(dead); // no-op once resolved
 		};
 
 		worker.onerror = (e) => fatal(new Error(`OCR worker error: ${e.message || 'unknown'}`));
@@ -69,7 +89,7 @@ export function connectOcrClient(worker: WorkerLike, base: string): Promise<OcrC
 			return {
 				alphabet,
 				backend,
-				process(frame) {
+				process(frame, opts) {
 					if (dead) {
 						frame.close();
 						return Promise.reject(dead);
@@ -78,7 +98,7 @@ export function connectOcrClient(worker: WorkerLike, base: string): Promise<OcrC
 					return new Promise<FrameResult>((resolve, reject) => {
 						pending.set(id, { resolve, reject });
 						try {
-							worker.postMessage({ type: 'frame', id, bitmap: frame }, [frame]);
+							worker.postMessage({ type: 'frame', id, bitmap: frame, opts }, [frame]);
 						} catch (err) {
 							pending.delete(id);
 							frame.close();

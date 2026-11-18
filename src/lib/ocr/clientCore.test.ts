@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { connectOcrClient, type WorkerLike } from './clientCore';
+import { OcrClientDeadError, connectOcrClient, isClientDead, type WorkerLike } from './clientCore';
 import type { WorkerRequest, WorkerResponse } from './paddleProtocol';
 import type { FrameResult } from './session';
 
@@ -110,5 +110,37 @@ describe('connectOcrClient', () => {
 		await expect(c.process(bmp)).rejects.toThrow('disposed');
 		expect(bmp.close).toHaveBeenCalled();
 		expect(w.terminated).toBe(true);
+	});
+
+	it('forwards per-frame options to the worker', async () => {
+		const w = new FakeWorker();
+		const c = await ready(w);
+		void c.process(fakeBitmap(), { detMaxSide: 2560 });
+		expect(w.sent[1]).toMatchObject({ type: 'frame', opts: { detMaxSide: 2560 } });
+	});
+
+	it('tags dead-client rejections; per-frame errors on a live worker are untagged', async () => {
+		const w = new FakeWorker();
+		const c = await ready(w);
+		const live = c.process(fakeBitmap());
+		w.reply({ type: 'error', id: (w.sent[1] as { id: number }).id, message: 'bad frame' });
+		const liveErr = await live.catch((e: unknown) => e);
+		expect(isClientDead(liveErr)).toBe(false);
+
+		const inFlight = c.process(fakeBitmap());
+		w.crash('oom');
+		const crashErr = await inFlight.catch((e: unknown) => e);
+		expect(crashErr).toBeInstanceOf(OcrClientDeadError);
+		expect((crashErr as OcrClientDeadError).code).toBe('client-dead');
+		expect((crashErr as Error).message).toMatch(/oom/);
+		const laterErr = await c.process(fakeBitmap()).catch((e: unknown) => e);
+		expect(isClientDead(laterErr)).toBe(true);
+	});
+
+	it('tags rejections after dispose as dead', async () => {
+		const w = new FakeWorker();
+		const c = await ready(w);
+		c.dispose();
+		expect(isClientDead(await c.process(fakeBitmap()).catch((e: unknown) => e))).toBe(true);
 	});
 });

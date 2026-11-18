@@ -1,19 +1,24 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import type { OcrClient } from '$lib/ocr/client';
+	import { isClientDead, type OcrClient } from '$lib/ocr/client';
 	import { ScanSession, type SessionStatus } from '$lib/ocr/session';
 	import { ScanFlow, containRect, fitLongSide } from '$lib/ocr/scanFlow';
 	import type { Recording } from '$lib/ocr/eval/replay';
 
 	interface Props {
-		/** Owned by the parent: this component never disposes it. */
-		client: OcrClient;
+		/**
+		 * Resolves the parent's shared OCR client (owned by the parent: this
+		 * component never disposes it). Called only after the camera is granted.
+		 */
+		getClient: () => Promise<OcrClient>;
+		/** The client's worker died: the parent drops it so `getClient` builds a fresh one. */
+		onclientdead: () => void;
 		onfinish: (text: string) => void;
 		/** No message: user cancelled. With a message: camera unavailable, parent shows it. */
 		oncancel: (message?: string) => void;
 		onfatal: (message: string) => void;
 	}
-	let { client, onfinish, oncancel, onfatal }: Props = $props();
+	let { getClient, onclientdead, onfinish, oncancel, onfatal }: Props = $props();
 
 	const CAMERA_ERROR = 'Camera unavailable. Upload a photo instead.';
 	const FATAL_ERROR = "Scanning isn't supported on this device";
@@ -37,10 +42,13 @@
 	let status = $state<SessionStatus>({ ...EMPTY_STATUS });
 	let part = $state(1);
 	let cameraError = $state<string | null>(null);
+	/** The camera is running and the OCR client is still loading. */
+	let loadingScanner = $state(false);
 
 	const flow = new ScanFlow();
-	// svelte-ignore state_referenced_locally
-	let session = new ScanSession(client.alphabet);
+	/** Set once loaded (after the camera is granted); replaced after a worker death. */
+	let client: OcrClient | null = null;
+	let session: ScanSession | null = null;
 	let stream: MediaStream | null = null;
 	/** Set once torn down: nothing may start again. */
 	let stopped = false;
@@ -69,6 +77,10 @@
 		teardown();
 	});
 
+	/**
+	 * Camera first, then the OCR client: a denied permission must not
+	 * download the models. Video playback starts while the models load.
+	 */
 	async function startCamera() {
 		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
 			cameraFailed();
@@ -96,6 +108,9 @@
 		}
 		stream = s;
 		videoEl.srcObject = s;
+		loadingScanner = true;
+		const clientP = getClient();
+		clientP.catch(() => {}); // handled below; avoid an unhandled rejection if play() fails first
 		try {
 			await videoEl.play();
 		} catch (err) {
@@ -105,6 +120,17 @@
 			return;
 		}
 		if (stopped) return;
+		try {
+			client = await clientP;
+		} catch (err) {
+			console.error('[camera] scanner failed to load', err);
+			terminate(() => onfatal(FATAL_ERROR));
+			return;
+		} finally {
+			loadingScanner = false;
+		}
+		if (stopped) return;
+		session = new ScanSession(client.alphabet);
 		phase = 'scanning';
 		startLoop();
 	}
@@ -125,10 +151,31 @@
 		cb();
 	}
 
-	/** A frame failed (bitmap capture or `process`): retry, or go fatal. */
+	/** A frame failed (bitmap capture or `process` on a live worker): retry, or go fatal. */
 	function frameFailed(what: string, err: unknown) {
 		console.warn(`[camera] ${what} failed`, err);
 		if (flow.onFrameError() === 'fatal') terminate(() => onfatal(FATAL_ERROR));
+	}
+
+	/**
+	 * The OCR worker died: get a fresh client once and keep scanning the same
+	 * part; a 2nd death in this scan is fatal. Runs while `busy`, so no frame
+	 * is sent until the new client is ready.
+	 */
+	async function workerDied(err: unknown) {
+		console.warn('[camera] OCR worker died', err);
+		if (flow.onWorkerDeath() === 'fatal') {
+			terminate(() => onfatal(FATAL_ERROR));
+			return;
+		}
+		onclientdead();
+		try {
+			const fresh = await getClient();
+			if (!stopped) client = fresh;
+		} catch (e) {
+			console.error('[camera] scanner failed to reload', e);
+			terminate(() => onfatal(FATAL_ERROR));
+		}
 	}
 
 	function startLoop() {
@@ -161,15 +208,17 @@
 		vfcId = null;
 		rafId = null;
 		if (!looping) return;
-		if (!busy && videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+		if (!busy && client && session && videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
 			void processFrame();
 		}
 		schedule();
 	}
 
 	async function processFrame() {
+		if (!client || !session) return;
 		busy = true;
 		const myGen = gen;
+		const c = client;
 		try {
 			let bitmap: ImageBitmap;
 			try {
@@ -192,12 +241,15 @@
 			}
 			let result;
 			try {
-				result = await client.process(bitmap); // transfers + closes the bitmap
+				result = await c.process(bitmap); // transfers + closes the bitmap
 			} catch (err) {
-				if (myGen === gen) frameFailed('process', err);
+				if (stopped) return;
+				// A death is handled even for a stale part: the client must be replaced.
+				if (isClientDead(err)) await workerDied(err);
+				else if (myGen === gen) frameFailed('process', err);
 				return;
 			}
-			if (myGen !== gen) return;
+			if (myGen !== gen || !session) return;
 			flow.onFrameOk();
 			status = session.addFrame(result, performance.now());
 			drawOverlay(result.width, result.height);
@@ -228,7 +280,7 @@
 		const { scale, dx, dy } = containRect(frameW, frameH, cw, ch);
 		if (scale === 0) return;
 		ctx.lineWidth = 2;
-		for (const t of session.tracks()) {
+		for (const t of session?.tracks() ?? []) {
 			ctx.strokeStyle = !t.confirmed
 				? COLOR_TENTATIVE
 				: t.profile.isLocked()
@@ -248,7 +300,7 @@
 
 	/** Ends the current part (auto on `done`, or the Done button). */
 	function endPart() {
-		if (phase !== 'scanning') return;
+		if (phase !== 'scanning' || !session) return;
 		gen++; // ignore any in-flight result for this part
 		stopLoop();
 		flow.endPart(session.rows());
@@ -259,7 +311,7 @@
 	}
 
 	function scanNextPart() {
-		if (stopped || phase !== 'between') return;
+		if (stopped || phase !== 'between' || !client) return;
 		flow.nextPart();
 		part = flow.part;
 		session = new ScanSession(client.alphabet);
@@ -337,7 +389,8 @@
 
 		{#if phase === 'starting' && !cameraError}
 			<div class="absolute inset-0 flex items-center justify-center text-sm text-white/80">
-				<span class="mr-2 inline-block animate-spin">&#x21bb;</span> Starting camera...
+				<span class="mr-2 inline-block animate-spin">&#x21bb;</span>
+				{loadingScanner ? 'Loading scanner…' : 'Starting camera...'}
 			</div>
 		{/if}
 
