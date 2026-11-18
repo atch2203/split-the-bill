@@ -53,12 +53,12 @@ describe('Tracker', () => {
 	it('ignores split boxes inside a track (review focus 1)', () => {
 		const t = new Tracker(ALPHABET, 640, 480);
 		for (let i = 0; i < 5; i++) t.update([fb(10, 100, 300, 20, 'BURGER  12.99')]);
-		for (let i = 0; i < 2; i++)
-			t.update([fb(10, 100, 120, 20, 'BURGER'), fb(240, 100, 70, 20, '12.99')]);
-		const r = t.update([fb(10, 100, 120, 20, 'BURGER'), fb(240, 100, 70, 20, '12.99')]);
-		expect(r.moved).toBe(false);
-		expect(Math.abs(r.shift.dx)).toBeLessThan(1);
-		expect(Math.abs(r.shift.dy)).toBeLessThan(1);
+		for (let i = 0; i < 2; i++) {
+			const r = t.update([fb(10, 100, 120, 20, 'BURGER'), fb(240, 100, 70, 20, '12.99')]);
+			expect(r.moved).toBe(false);
+			expect(Math.abs(r.shift.dx)).toBeLessThan(1);
+			expect(Math.abs(r.shift.dy)).toBeLessThan(1);
+		}
 		const final = t.finalTracks();
 		expect(final.length).toBe(1);
 		expect(final[0].profile.readout()).toBe('BURGER  12.99');
