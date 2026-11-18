@@ -356,7 +356,7 @@
 		let personHtml = '';
 		for (const total of syncedBillStore.personTotals) {
 			personHtml += `
-				<div style="border: 2px solid ${syncedBillStore.people.find(p => p.id === total.personId)?.color || '#ccc'}; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
+				<div class="person" style="border: 2px solid ${syncedBillStore.people.find(p => p.id === total.personId)?.color || '#ccc'}; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
 					<div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 8px;">
 						<span style="color: ${syncedBillStore.people.find(p => p.id === total.personId)?.color || '#333'};">${total.personName}</span>
 						<span>${formatPrice(total.grandTotal)}</span>
@@ -389,11 +389,20 @@
 					.total-row { display: flex; justify-content: space-between; padding: 2px 0; }
 					.grand-total { font-weight: bold; font-size: 18px; margin-top: 8px; padding-top: 8px; border-top: 2px solid #333; }
 					.badge { color: white; padding: 2px 8px; border-radius: 12px; font-size: 13px; margin-left: 6px; display: inline-block; }
+					.person { break-inside: avoid; }
+					/* Wide screens (and Letter/A4 print): items on the left, who owes what on the right. */
+					@media (min-width: 700px) {
+						body { max-width: 1000px; }
+						.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; }
+						.columns > div > h2:first-child { margin-top: 0; }
+					}
 				</style>
 			</head>
 			<body>
 				<h1>${docTitle}</h1>
 
+				<div class="columns">
+				<div>
 				${syncedBillStore.items.length > 0 ? `
 					<h2>Items</h2>
 					<table>
@@ -407,7 +416,9 @@
 					${syncedBillStore.effectiveTipAmount > 0 ? `<div class="total-row"><span>Tip</span><span>${formatPrice(syncedBillStore.effectiveTipAmount)}</span></div>` : ''}
 					<div class="total-row grand-total"><span>Total</span><span>${formatPrice(billTotal)}</span></div>
 				</div>
+				</div>
 
+				<div>
 				${syncedBillStore.personTotals.length > 0 ? `
 					<h2>Each Person Owes</h2>
 					${personHtml}
@@ -419,6 +430,8 @@
 						${syncedBillStore.paymentMethods.map(pm => `<tr><td><strong>${pm.label || 'Payment'}</strong></td><td style="text-align: right;">${pm.value}</td></tr>`).join('')}
 					</table>
 				` : ''}
+				</div>
+				</div>
 
 				<p style="margin-top: 24px; font-size: 12px; color: #888; text-align: center;">
 					🧾 <a href="https://stb.atch.dev" style="color: #888;">https://stb.atch.dev</a>
