@@ -3,11 +3,18 @@
 	import { tesseractEngine } from '$lib/ocr/tesseractEngine';
 	import { scoreParse, type ExpectedReceipt, type Score } from '$lib/ocr/eval/score';
 	import { createOcrClient, type OcrClient } from '$lib/ocr/client';
-	import { assembleRows, rowsToText } from '$lib/ocr/rows';
+	import { rowsToText } from '$lib/ocr/rows';
+	import { ScanSession } from '$lib/ocr/session';
+	import { synthFrames } from '$lib/ocr/eval/synth';
+	import { replayFrames, type Recording } from '$lib/ocr/eval/replay';
+	import { hash } from '$lib/ocr/eval/rng';
+	import { onDestroy } from 'svelte';
 
 	interface EvalEngine {
 		name: string;
-		run(files: File[]): Promise<string>;
+		/** 'recording' engines take `<name>.recording.json` files instead of images. */
+		input?: 'image' | 'recording';
+		run(files: File[], name: string): Promise<string>;
 	}
 
 	// Lazily created, shared PaddleOCR worker client.
@@ -26,7 +33,15 @@
 		return paddle;
 	}
 
-	// Extended with more engines in a later task.
+	onDestroy(() => {
+		paddle?.then((c) => c.dispose(), () => {});
+		paddle = null;
+	});
+
+	async function decodeDataUrl(url: string): Promise<ImageBitmap> {
+		return createImageBitmap(await (await fetch(url)).blob());
+	}
+
 	const engines: EvalEngine[] = [
 		{
 			name: tesseractEngine.name,
@@ -40,12 +55,37 @@
 			}
 		},
 		{
-			// Temporary single-frame Paddle engine (finalized in Task 8).
 			name: 'paddle-single',
 			async run(files) {
 				const client = await getPaddle();
 				const result = await client.process(await createImageBitmap(files[0]));
-				return rowsToText(assembleRows(result.boxes.map((b) => ({ box: b.box, text: b.text, confidence: 1 }))));
+				const session = new ScanSession(client.alphabet, { tracker: { confirmFrames: 1 } });
+				session.addFrame(result, 0);
+				return rowsToText(session.rows());
+			}
+		},
+		{
+			name: 'paddle-fused',
+			async run(files, name) {
+				const client = await getPaddle();
+				const img = await createImageBitmap(files[0]);
+				try {
+					const frames = await synthFrames(img, 20, hash(name));
+					return (await replayFrames(client, frames)).text;
+				} finally {
+					img.close();
+				}
+			}
+		},
+		{
+			name: 'recording',
+			input: 'recording',
+			async run(files) {
+				const client = await getPaddle();
+				const rec = JSON.parse(await files[0].text()) as Recording;
+				if (rec.version !== 1 || !Array.isArray(rec.frames)) throw new Error('not a Recording v1 file');
+				const frames = await Promise.all(rec.frames.map(decodeDataUrl));
+				return (await replayFrames(client, frames)).text;
 			}
 		}
 	];
@@ -78,18 +118,21 @@
 		if (!engine) return;
 		running = true;
 		rows = [];
-		const stem = (n: string) => n.replace(/\.[^.]+$/, '');
+		const stem = (n: string) => n.replace(/\.recording\.json$/i, '').replace(/\.[^.]+$/, '');
 		const expectedFiles = new Map(
 			files.filter((f) => f.name.endsWith('.expected.json')).map((f) => [f.name.replace(/\.expected\.json$/, ''), f])
 		);
-		const images = files.filter((f) => /\.(jpe?g|png)$/i.test(f.name));
+		const isRec = engine.input === 'recording';
+		const images = files.filter((f) =>
+			isRec ? /\.recording\.json$/i.test(f.name) : /\.(jpe?g|png)$/i.test(f.name)
+		);
 		for (const img of images) {
 			const name = stem(img.name);
 			try {
 				const expFile = expectedFiles.get(name);
 				if (!expFile) throw new Error(`missing ${name}.expected.json`);
 				const expected = JSON.parse(await expFile.text()) as ExpectedReceipt;
-				const rawText = await engine.run([img]);
+				const rawText = await engine.run([img], name);
 				rows.push({ name, score: scoreParse(expected, parseReceiptText(rawText)), rawText });
 			} catch (err) {
 				rows.push({ name, score: null, rawText: '', error: err instanceof Error ? err.message : String(err) });
