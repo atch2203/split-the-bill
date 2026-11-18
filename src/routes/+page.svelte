@@ -199,6 +199,10 @@
 			</div>
 		{/if}
 		{/if}
+		{#if !showTotals}
+			<!-- Saved sessions stay reachable before the full Export panel unlocks. -->
+			<ExportImport savesOnly />
+		{/if}
 		{/if}
 	</main>
 

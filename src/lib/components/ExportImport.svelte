@@ -6,6 +6,10 @@
 
 	import { onMount } from 'svelte';
 
+	// savesOnly: just the saved-sessions picker (shown before the full panel is
+	// unlocked); renders nothing when there are no saves.
+	let { savesOnly = false }: { savesOnly?: boolean } = $props();
+
 	const STORAGE_KEY = 'split-the-bill:saves';
 
 	type SavedSession = {
@@ -453,6 +457,73 @@
 	}
 </script>
 
+{#snippet savesButton()}
+	<button
+		onclick={() => (showSaves = !showSaves)}
+		disabled={savedSessions.length === 0}
+		class="flex w-full items-center justify-center gap-1.5 rounded-lg bg-teal-400 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:justify-start"
+		title={savedSessions.length === 0 ? 'No saved sessions' : 'Show saved sessions'}
+	>
+		<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+		</svg>
+		Saved sessions ({savedSessions.length})
+	</button>
+{/snippet}
+
+{#snippet savesList()}
+	{#if showSaves && savedSessions.length > 0}
+		<div class="mt-3 space-y-1.5">
+			{#each savedSessions as session (session.id)}
+				<div class="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+					<div class="min-w-0 flex-1">
+						<div class="truncate font-medium text-gray-800">{session.name}</div>
+						<div class="text-xs text-gray-500">{formatSavedAt(session.savedAt)}</div>
+					</div>
+					{#if !peerStore.isGuest}
+						<button
+							onclick={() => loadSession(session.id)}
+							class="rounded-lg bg-teal-500 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-teal-600"
+						>
+							Load
+						</button>
+					{:else}
+						<span class="text-xs text-gray-400" title="Leave the room to load a saved bill">
+							Leave room to load
+						</span>
+					{/if}
+					<button
+						onclick={() => deleteSession(session.id)}
+						class="rounded p-1 text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600"
+						title="Delete saved session"
+						aria-label="Delete saved session"
+					>
+						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+			{/each}
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet message()}
+	{#if exportMessage}
+		<p class="mt-2 text-sm {isError ? 'text-red-600' : 'text-green-600'}">{exportMessage}</p>
+	{/if}
+{/snippet}
+
+{#if savesOnly}
+	{#if savedSessions.length > 0}
+		<div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+			<h2 class="mb-3 text-lg font-semibold text-gray-800">Saved sessions</h2>
+			{@render savesButton()}
+			{@render savesList()}
+			{@render message()}
+		</div>
+	{/if}
+{:else}
 <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
 	<h2 class="mb-3 text-lg font-semibold text-gray-800">Export / Import</h2>
 
@@ -508,17 +579,7 @@
 			</svg>
 			Save to browser
 		</button>
-		<button
-			onclick={() => (showSaves = !showSaves)}
-			disabled={savedSessions.length === 0}
-			class="flex w-full items-center justify-center gap-1.5 rounded-lg bg-teal-400 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:justify-start"
-			title={savedSessions.length === 0 ? 'No saved sessions' : 'Show saved sessions'}
-		>
-			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
-			</svg>
-			Saved sessions ({savedSessions.length})
-		</button>
+		{@render savesButton()}
 	</div>
 
 	{#if showSaveForm}
@@ -549,40 +610,7 @@
 		</div>
 	{/if}
 
-	{#if showSaves && savedSessions.length > 0}
-		<div class="mt-3 space-y-1.5">
-			{#each savedSessions as session (session.id)}
-				<div class="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
-					<div class="min-w-0 flex-1">
-						<div class="truncate font-medium text-gray-800">{session.name}</div>
-						<div class="text-xs text-gray-500">{formatSavedAt(session.savedAt)}</div>
-					</div>
-					{#if !peerStore.isGuest}
-						<button
-							onclick={() => loadSession(session.id)}
-							class="rounded-lg bg-teal-500 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-teal-600"
-						>
-							Load
-						</button>
-					{:else}
-						<span class="text-xs text-gray-400" title="Leave the room to load a saved bill">
-							Leave room to load
-						</span>
-					{/if}
-					<button
-						onclick={() => deleteSession(session.id)}
-						class="rounded p-1 text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600"
-						title="Delete saved session"
-						aria-label="Delete saved session"
-					>
-						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-						</svg>
-					</button>
-				</div>
-			{/each}
-		</div>
-	{/if}
+	{@render savesList()}
 
 	{#if showDataField}
 		<div class="mt-3 space-y-2">
@@ -610,7 +638,6 @@
 		</div>
 	{/if}
 
-	{#if exportMessage}
-		<p class="mt-2 text-sm {isError ? 'text-red-600' : 'text-green-600'}">{exportMessage}</p>
-	{/if}
+	{@render message()}
 </div>
+{/if}
