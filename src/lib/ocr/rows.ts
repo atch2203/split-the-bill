@@ -50,12 +50,16 @@ function normDist(a: string, b: string): number {
 	return m === 0 ? 0 : levenshtein(a, b) / m;
 }
 
+const digits = (s: string) => s.replace(/\D/g, '');
+
 export function mergeParts(acc: Row[], next: Row[], maxDist = 0.2): Row[] {
 	let L = 0;
 	for (let k = Math.min(acc.length, next.length); k > 0; k--) {
 		let ok = true;
 		for (let i = 0; i < k; i++) {
-			if (normDist(acc[acc.length - k + i].text, next[i].text) > maxDist) {
+			const a = acc[acc.length - k + i].text;
+			const b = next[i].text;
+			if (normDist(a, b) > maxDist || digits(a) !== digits(b)) {
 				ok = false;
 				break;
 			}

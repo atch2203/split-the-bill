@@ -60,5 +60,14 @@ describe('mergeParts', () => {
 		const next = rows(['CHEESE 3.50.'], 0.9);
 		mergeParts(acc, next);
 		expect(acc[0]).toEqual({ text: 'CHEESE 3.50', confidence: 0.5, y: 0 });
+		expect(next).toEqual(rows(['CHEESE 3.50.'], 0.9));
+	});
+	it('keeps both rows when digits differ (COKE 2.50 vs 2.60)', () => {
+		const out = mergeParts(rows(['A 1', 'COKE 2.50']), rows(['COKE 2.60', 'TEA 1.00']));
+		expect(out.map((r) => r.text)).toEqual(['A 1', 'COKE 2.50', 'COKE 2.60', 'TEA 1.00']);
+	});
+	it('merges partial overlap (larger L fails, L=1 succeeds)', () => {
+		const out = mergeParts(rows(['A 1', 'B 2', 'C 3']), rows(['C 3', 'D 4']));
+		expect(out.map((r) => r.text)).toEqual(['A 1', 'B 2', 'C 3', 'D 4']);
 	});
 });
