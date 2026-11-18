@@ -9,7 +9,7 @@ export interface FusionConfig {
 	pMiss: number;
 	/** Needleman–Wunsch penalty when the frame inserts a char. */
 	gapIns: number;
-	/** Needleman–Wunsch penalty when the frame deletes a char, scaled by (1 - P_k(ε)). */
+	/** Needleman–Wunsch penalty when the frame deletes a char, scaled by P_k(real). */
 	gapDel: number;
 	/** Lock threshold for every non-ε column. */
 	lockTau: number;
@@ -17,14 +17,14 @@ export interface FusionConfig {
 	priceLockTau: number;
 	/** Minimum frames observed before the line can lock. */
 	minFrames: number;
-	/** Starting ε log-evidence (relative to the chars) for first-frame columns. */
+	/** Starting ε log-odds for a new column; its existence log-odds start at -initEpsLogit. */
 	initEpsLogit: number;
 }
 
 export const DEFAULT_FUSION_CONFIG: FusionConfig = {
 	alpha: 0.5,
 	probFloor: 1e-3,
-	pMiss: 0.05,
+	pMiss: 0.1,
 	gapIns: -4,
 	gapDel: -4,
 	lockTau: 0.95,
@@ -35,32 +35,42 @@ export const DEFAULT_FUSION_CONFIG: FusionConfig = {
 
 const PRICE_CHAR = /[0-9.]/;
 
-function logSumExp(v: Float64Array, n: number): number {
-	let max = -Infinity;
-	for (let i = 0; i < n; i++) if (v[i] > max) max = v[i];
-	if (max === -Infinity) return max;
-	let s = 0;
-	for (let i = 0; i < n; i++) s += Math.exp(v[i] - max);
-	return max + Math.log(s);
+/**
+ * One column of the line. Existence and identity are factorized so that
+ * contested identity evidence never leaks into P(ε).
+ */
+interface Column {
+	/** Existence log-odds, log P(real) / P(ε). */
+	e: number;
+	/** Identity log-evidence over the A alphabet symbols (no ε slot). */
+	logp: Float64Array;
 }
 
-/** Numerically stable softmax over all A + 1 entries. */
-function softmax(logp: Float64Array): Float64Array {
-	const lse = logSumExp(logp, logp.length);
-	const out = new Float64Array(logp.length);
-	for (let i = 0; i < logp.length; i++) out[i] = Math.exp(logp[i] - lse);
+/** Numerically stable softmax (max-shifted log-sum-exp). */
+function softmax(v: Float64Array): Float64Array {
+	let max = -Infinity;
+	for (let i = 0; i < v.length; i++) if (v[i] > max) max = v[i];
+	const out = new Float64Array(v.length);
+	let s = 0;
+	for (let i = 0; i < v.length; i++) s += out[i] = Math.exp(v[i] - max);
+	for (let i = 0; i < v.length; i++) out[i] /= s;
 	return out;
 }
 
+const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
+
 /**
- * Fuses per-frame readings of one text line into per-column posteriors over
- * alphabet ∪ {ε}. Each frame is aligned to the columns with global
- * Needleman–Wunsch, so frames may insert or drop characters.
+ * Fuses per-frame readings of one text line into per-column posteriors:
+ * P(real) via existence log-odds, and identity over the alphabet. Each frame is
+ * aligned to the columns with global Needleman–Wunsch, so frames may insert or
+ * drop characters.
  */
 export class LineProfile {
 	private readonly A: number;
 	private readonly cfg: FusionConfig;
-	private cols: Float64Array[];
+	/** α·log((1 - pMiss) / pMiss): existence evidence of one match or one skip. */
+	private readonly existStep: number;
+	private cols: Column[];
 	private n = 1;
 
 	constructor(
@@ -70,11 +80,8 @@ export class LineProfile {
 	) {
 		this.A = alphabet.length;
 		this.cfg = cfg;
-		this.cols = first.map((d) => {
-			const col = this.charEvidence(d);
-			col[this.A] = logSumExp(col, this.A) + cfg.initEpsLogit;
-			return col;
-		});
+		this.existStep = cfg.alpha * Math.log((1 - cfg.pMiss) / cfg.pMiss);
+		this.cols = first.map((d) => ({ e: -cfg.initEpsLogit, logp: this.charEvidence(d) }));
 	}
 
 	get frames(): number {
@@ -82,22 +89,21 @@ export class LineProfile {
 	}
 
 	get columnCount(): number {
-		return this.readoutColumns().length;
+		return this.realColumns().length;
 	}
 
 	observe(obs: CharDist[]): void {
-		const { A, cfg } = this;
-		const { alpha } = cfg;
+		const { A, cfg, existStep } = this;
 		const nPrev = this.n;
 		const cols = this.cols;
 		const n = cols.length;
 		const m = obs.length;
-		const post = cols.map(softmax);
+		const post = cols.map((col) => softmax(col.logp));
 
 		// Needleman–Wunsch: dp[i][j] = best score aligning cols[0..i) with obs[0..j).
 		const W = m + 1;
 		const dp = new Float64Array((n + 1) * W);
-		const del = post.map((p) => cfg.gapDel * (1 - p[A]));
+		const del = cols.map((col) => cfg.gapDel * sigmoid(col.e));
 		for (let i = 1; i <= n; i++) dp[i * W] = dp[(i - 1) * W] + del[i - 1];
 		for (let j = 1; j <= m; j++) dp[j] = dp[j - 1] + cfg.gapIns;
 		const matchScore = (i: number, j: number) => {
@@ -118,9 +124,7 @@ export class LineProfile {
 		}
 
 		// Traceback (right to left), applying updates and collecting columns in reverse.
-		const logMiss = alpha * Math.log(cfg.pMiss);
-		const logHit = alpha * Math.log(1 - cfg.pMiss);
-		const out: Float64Array[] = [];
+		const out: Column[] = [];
 		let i = n;
 		let j = m;
 		while (i > 0 || j > 0) {
@@ -128,86 +132,81 @@ export class LineProfile {
 			if (i > 0 && j > 0 && here === dp[(i - 1) * W + j - 1] + matchScore(i - 1, j - 1)) {
 				const col = cols[i - 1];
 				const ev = this.charEvidence(obs[j - 1]);
-				for (let c = 0; c < A; c++) col[c] += ev[c];
-				col[A] += logMiss;
+				for (let c = 0; c < A; c++) col.logp[c] += ev[c];
+				col.e += existStep;
 				out.push(col);
 				i--;
 				j--;
 			} else if (i > 0 && (j === 0 || here === dp[(i - 1) * W + j] + del[i - 1])) {
 				const col = cols[i - 1];
-				for (let c = 0; c < A; c++) col[c] += logMiss;
-				col[A] += logHit;
+				col.e -= existStep;
 				out.push(col);
 				i--;
 			} else {
-				// Insertion: carries the ε evidence of nPrev skips, relative to the chars.
-				const col = this.charEvidence(obs[j - 1]);
-				col[A] = logSumExp(col, A) + nPrev * (logHit - logMiss);
-				out.push(col);
+				// Prior, nPrev skips, and this match.
+				out.push({
+					e: -cfg.initEpsLogit + (1 - nPrev) * existStep,
+					logp: this.charEvidence(obs[j - 1])
+				});
 				j--;
 			}
 		}
 		out.reverse();
-		for (const col of out) normalize(col);
+		for (const col of out) normalize(col.logp);
 		this.cols = out;
 		this.n++;
 	}
 
 	readout(): string {
-		return this.readoutColumns()
-			.map((k) => this.alphabet[argmaxChar(softmax(this.cols[k]), this.A)])
+		return this.realPosteriors()
+			.map((p) => this.alphabet[argmax(p)])
 			.join('');
 	}
 
 	confidence(): number {
 		let min = 1;
-		for (const k of this.readoutColumns()) min = Math.min(min, maxCharProb(softmax(this.cols[k]), this.A));
+		for (const p of this.realPosteriors()) min = Math.min(min, p[argmax(p)]);
 		return min;
 	}
 
 	isLocked(): boolean {
 		if (this.n < this.cfg.minFrames) return false;
-		const ks = this.readoutColumns();
-		const posts = ks.map((k) => softmax(this.cols[k]));
-		const chars = posts.map((p) => this.alphabet[argmaxChar(p, this.A)]);
+		const posts = this.realPosteriors();
+		const chars = posts.map((p) => this.alphabet[argmax(p)]);
 		let priceStart = chars.length;
 		while (priceStart > 0 && PRICE_CHAR.test(chars[priceStart - 1])) priceStart--;
 		return posts.every((p, idx) => {
 			const tau = idx >= priceStart ? this.cfg.priceLockTau : this.cfg.lockTau;
-			return maxCharProb(p, this.A) >= tau;
+			return p[argmax(p)] >= tau;
 		});
 	}
 
-	/** Indices of columns with P(ε) < 0.5. */
-	private readoutColumns(): number[] {
-		const ks: number[] = [];
-		this.cols.forEach((col, k) => {
-			if (softmax(col)[this.A] < 0.5) ks.push(k);
-		});
-		return ks;
+	/** Columns with P(ε) = sigmoid(-e) < 0.5, i.e. e > 0. */
+	private realColumns(): Column[] {
+		return this.cols.filter((col) => col.e > 0);
 	}
 
-	/** New column (length A + 1, ε = 0) holding α·log(probFloor + d(c)) for each char. */
+	private realPosteriors(): Float64Array[] {
+		return this.realColumns().map((col) => softmax(col.logp));
+	}
+
+	/** α·log(probFloor + d(c)) for each alphabet symbol. */
 	private charEvidence(d: CharDist): Float64Array {
-		const col = new Float64Array(this.A + 1);
-		for (let c = 0; c < this.A; c++) col[c] = this.cfg.alpha * Math.log(this.cfg.probFloor + d[c]);
-		return col;
+		const ev = new Float64Array(this.A);
+		for (let c = 0; c < this.A; c++) ev[c] = this.cfg.alpha * Math.log(this.cfg.probFloor + d[c]);
+		return ev;
 	}
 }
 
 /** Shift so the max entry is 0; softmax is unchanged and magnitudes stay bounded. */
-function normalize(col: Float64Array): void {
+function normalize(v: Float64Array): void {
 	let max = -Infinity;
-	for (let i = 0; i < col.length; i++) if (col[i] > max) max = col[i];
-	for (let i = 0; i < col.length; i++) col[i] -= max;
+	for (let i = 0; i < v.length; i++) if (v[i] > max) max = v[i];
+	for (let i = 0; i < v.length; i++) v[i] -= max;
 }
 
-function argmaxChar(p: Float64Array, A: number): number {
+function argmax(p: Float64Array): number {
 	let best = 0;
-	for (let c = 1; c < A; c++) if (p[c] > p[best]) best = c;
+	for (let c = 1; c < p.length; c++) if (p[c] > p[best]) best = c;
 	return best;
-}
-
-function maxCharProb(p: Float64Array, A: number): number {
-	return p[argmaxChar(p, A)];
 }

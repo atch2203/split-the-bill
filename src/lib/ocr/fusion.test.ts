@@ -62,6 +62,14 @@ describe('LineProfile', () => {
 		expect(lp.isLocked()).toBe(false);
 	});
 
+	it('contested stays real', () => {
+		const lp = profile('12.99');
+		for (let i = 0; i < 5; i++) lp.observe(obs('12.99'));
+		for (let i = 0; i < 6; i++) lp.observe(obs('12.89'));
+		expect(lp.readout().length).toBe(5);
+		expect(lp.isLocked()).toBe(false);
+	});
+
 	it('empty obs', () => {
 		const lp = profile('AB');
 		lp.observe(obs('AB'));
