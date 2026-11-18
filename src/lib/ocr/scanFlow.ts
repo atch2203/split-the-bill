@@ -4,6 +4,23 @@ import { mergeParts, rowsToText, type Row } from './rows';
 export const MAX_CONSECUTIVE_ERRORS = 2;
 
 /**
+ * Counts consecutive `process` rejections outside the camera flow (photo upload).
+ * Persists across scans; a successful `process` resets it.
+ */
+export class ProcessErrorCounter {
+	private errors = 0;
+
+	onOk(): void {
+		this.errors = 0;
+	}
+
+	onError(): 'retry' | 'fatal' {
+		this.errors++;
+		return this.errors >= MAX_CONSECUTIVE_ERRORS ? 'fatal' : 'retry';
+	}
+}
+
+/**
  * Multi-part camera scan state, kept free of DOM so it can be unit tested.
  * Each part's rows are merged into the accumulated rows with `mergeParts`.
  */

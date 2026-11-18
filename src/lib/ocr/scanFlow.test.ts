@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ScanFlow, containRect, fitLongSide } from './scanFlow';
+import { ProcessErrorCounter, ScanFlow, containRect, fitLongSide } from './scanFlow';
 import { rowsToText, type Row } from './rows';
 
 const rows = (texts: string[], conf = 0.9): Row[] =>
@@ -86,5 +86,20 @@ describe('fitLongSide', () => {
 	});
 	it('never upscales', () => {
 		expect(fitLongSide(640, 480, 1280)).toEqual({ w: 640, h: 480 });
+	});
+});
+
+describe('ProcessErrorCounter', () => {
+	it('is fatal on the 2nd consecutive error', () => {
+		const c = new ProcessErrorCounter();
+		expect(c.onError()).toBe('retry');
+		expect(c.onError()).toBe('fatal');
+	});
+
+	it('resets on success', () => {
+		const c = new ProcessErrorCounter();
+		expect(c.onError()).toBe('retry');
+		c.onOk();
+		expect(c.onError()).toBe('retry');
 	});
 });

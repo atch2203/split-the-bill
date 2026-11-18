@@ -4,7 +4,8 @@
 	import { parseReceiptText } from '$lib/utils/receiptParser';
 	// Importing client.ts does not start the worker; only createOcrClient() does.
 	import { createOcrClient, type OcrClient } from '$lib/ocr/client';
-	import { ScanSession } from '$lib/ocr/session';
+	import { ScanSession, type FrameResult } from '$lib/ocr/session';
+	import { ProcessErrorCounter } from '$lib/ocr/scanFlow';
 	import { rowsToText } from '$lib/ocr/rows';
 	import CameraScanner from './CameraScanner.svelte';
 
@@ -29,6 +30,8 @@
 	/** Lazily created on first user action; shared by camera and upload. */
 	let clientPromise: Promise<OcrClient> | null = null;
 	let destroyed = false;
+	/** Consecutive upload `process` failures; the 2nd is fatal. */
+	const uploadErrors = new ProcessErrorCounter();
 
 	onMount(() => {
 		cameraSupported = !!navigator.mediaDevices?.getUserMedia;
@@ -56,6 +59,7 @@
 	/** Load failure, or a fatal error from the camera scanner. */
 	function scannerUnsupported() {
 		dropClient();
+		uploadErrors.onOk(); // a later retry starts with a fresh count
 		cameraClient = null;
 		scanError = UNSUPPORTED_ERROR;
 		inputMode = 'text';
@@ -121,28 +125,51 @@
 		isScanning = true;
 		scanError = null;
 		let text: string;
-		let bitmap: ImageBitmap | null = null;
 		try {
-			bitmap = await createImageBitmap(file);
-			// `process` consumes (closes) the bitmap.
-			const result = await client.process(bitmap);
-			const session = new ScanSession(client.alphabet, { tracker: { confirmFrames: 1 } });
-			session.addFrame(result, 0);
-			text = rowsToText(session.rows());
-		} catch (err) {
-			console.error('[OCR] Error:', err);
-			console.error('[OCR] Error stack:', err instanceof Error ? err.stack : 'N/A');
-			scanError = `Failed to scan receipt: ${err instanceof Error ? err.message : 'Unknown error'}`;
-			// A `process` failure may mean the worker died: start a fresh one next time.
-			// (A bad image file fails in createImageBitmap and keeps the client.)
-			if (bitmap) dropClient();
-			return;
+			let bitmap: ImageBitmap;
+			try {
+				bitmap = await createImageBitmap(file);
+			} catch (err) {
+				// Bad image file: not a scanner problem, keep the client.
+				reportScanError(err);
+				return;
+			}
+			let result: FrameResult;
+			try {
+				// `process` consumes (closes) the bitmap.
+				result = await client.process(bitmap);
+			} catch (err) {
+				reportScanError(err);
+				if (destroyed) return;
+				if (uploadErrors.onError() === 'fatal') {
+					scannerUnsupported();
+				} else {
+					// The worker may have died: start a fresh one next time.
+					dropClient();
+				}
+				return;
+			}
+			uploadErrors.onOk();
+			try {
+				const session = new ScanSession(client.alphabet, { tracker: { confirmFrames: 1 } });
+				session.addFrame(result, 0);
+				text = rowsToText(session.rows());
+			} catch (err) {
+				reportScanError(err);
+				return;
+			}
 		} finally {
 			isScanning = false;
 			console.log('[OCR] Scan complete');
 		}
 		if (destroyed) return;
 		applyOcrText(text);
+	}
+
+	function reportScanError(err: unknown) {
+		console.error('[OCR] Error:', err);
+		console.error('[OCR] Error stack:', err instanceof Error ? err.stack : 'N/A');
+		scanError = `Failed to scan receipt: ${err instanceof Error ? err.message : 'Unknown error'}`;
 	}
 
 	function applyOcrText(text: string) {
