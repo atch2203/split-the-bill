@@ -19,6 +19,8 @@ export interface Track {
 	profile: LineProfile;
 	seen: number;
 	firstFrame: number;
+	/** Frame index (1-based) this track was last matched in. */
+	lastSeen: number;
 	confirmed: boolean;
 }
 export interface TrackerConfig {
@@ -28,6 +30,8 @@ export interface TrackerConfig {
 	minSeenFrac: number;
 	moveFrac: number;
 	containFrac: number;
+	/** Tentative tracks unseen for more than this many frames are dropped (camera-motion debris). */
+	pruneFrames: number;
 }
 
 export const DEFAULT_TRACKER_CONFIG: TrackerConfig = {
@@ -36,7 +40,8 @@ export const DEFAULT_TRACKER_CONFIG: TrackerConfig = {
 	confirmFrames: 3,
 	minSeenFrac: 0.3,
 	moveFrac: 0.05,
-	containFrac: 0.8
+	containFrac: 0.8,
+	pruneFrames: 3
 };
 
 const area = (b: Box) => b.w * b.h;
@@ -145,6 +150,7 @@ export class Tracker {
 			t.box = b.box;
 			t.profile.observe(b.dists);
 			t.seen++;
+			t.lastSeen = this._frameIndex;
 			if (t.seen >= c.confirmFrames) t.confirmed = true;
 		}
 
@@ -166,9 +172,15 @@ export class Tracker {
 				profile: new LineProfile(this.alphabet, b.dists, this.fusion),
 				seen: 1,
 				firstFrame: this._frameIndex,
+				lastSeen: this._frameIndex,
 				confirmed: 1 >= c.confirmFrames
 			});
 		});
+
+		// Tentative tracks that stopped matching are debris from camera motion.
+		this._tracks = this._tracks.filter(
+			(t) => t.confirmed || this._frameIndex - t.lastSeen <= c.pruneFrames
+		);
 
 		return { shift: { dx, dy }, moved };
 	}

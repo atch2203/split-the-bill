@@ -1,4 +1,5 @@
 import type { Backend, ProcessOptions, WorkerRequest, WorkerResponse } from './paddleProtocol';
+import type { LoadProgress } from './download';
 import type { FrameResult } from './session';
 
 export interface OcrClient {
@@ -44,7 +45,11 @@ export interface WorkerLike {
  * After a worker crash or `messageerror` the client is dead: pending and later
  * `process()` calls reject, never hang.
  */
-export function connectOcrClient(worker: WorkerLike, base: string): Promise<OcrClient> {
+export function connectOcrClient(
+	worker: WorkerLike,
+	base: string,
+	onProgress?: (p: LoadProgress) => void
+): Promise<OcrClient> {
 	const pending = new Map<number, { resolve: (r: FrameResult) => void; reject: (e: Error) => void }>();
 	let nextId = 1;
 	/** Set once the client can no longer process frames (disposed or worker died). */
@@ -70,7 +75,9 @@ export function connectOcrClient(worker: WorkerLike, base: string): Promise<OcrC
 
 		worker.onmessage = (e) => {
 			const msg = e.data;
-			if (msg.type === 'ready') {
+			if (msg.type === 'progress') {
+				onProgress?.(msg.progress);
+			} else if (msg.type === 'ready') {
 				resolveInit(client(msg.backend, msg.alphabet));
 			} else if (msg.type === 'result') {
 				pending.get(msg.id)?.resolve(msg.result);

@@ -3,12 +3,13 @@
 	import { billStore } from '$lib/stores/billStore.svelte';
 	import { parseReceiptText } from '$lib/utils/receiptParser';
 	// Importing client.ts does not start the worker; only createOcrClient() does.
-	import { createOcrClient, type OcrClient } from '$lib/ocr/client';
+	import { createOcrClient, type LoadProgress, type OcrClient } from '$lib/ocr/client';
 	import { ScanSession, type FrameResult } from '$lib/ocr/session';
 	import { ProcessErrorCounter } from '$lib/ocr/scanFlow';
 	import { UPLOAD_DET_MAX_SIDE } from '$lib/ocr/paddlePre';
 	import { rowsToText } from '$lib/ocr/rows';
 	import CameraScanner from './CameraScanner.svelte';
+	import ScannerLoading from './ScannerLoading.svelte';
 
 	const UNSUPPORTED_ERROR = "Scanning isn't supported on this device";
 
@@ -16,12 +17,16 @@
 	let imagePreview = $state<string | null>(null);
 	let isScanning = $state(false);
 	let isLoadingScanner = $state(false);
+	/** Progress of the in-flight client load; null once it settles. */
+	let loadProgress = $state<LoadProgress | null>(null);
 	let scanError = $state<string | null>(null);
-	let showRawText = $state(false);
 
 	// Input mode: 'scan' for OCR, 'text' for manual text entry
-	let inputMode = $state<'scan' | 'text'>('text');
-	let manualText = $state('');
+	let inputMode = $state<'scan' | 'text'>('scan');
+	// Starts with the last scanned/parsed text so it can be edited and re-parsed.
+	let manualText = $state(billStore.rawOcrText);
+	/** The text box holds scanner output (shows an edit hint). */
+	let textFromScan = $state(false);
 	let showInstructions = $state(false);
 
 	// Live camera scanning: set after mount so SSR/prerender markup matches hydration.
@@ -45,7 +50,25 @@
 	});
 
 	function getClient(): Promise<OcrClient> {
-		clientPromise ??= createOcrClient();
+		if (!clientPromise) {
+			loadProgress = null;
+			const p = createOcrClient((progress) => {
+				if (p === clientPromise) loadProgress = progress;
+			});
+			clientPromise = p;
+			p.then(
+				() => {
+					if (p === clientPromise) loadProgress = null;
+				},
+				() => {
+					// Don't keep a failed load memoized: a later attempt retries.
+					if (p === clientPromise) {
+						clientPromise = null;
+						loadProgress = null;
+					}
+				}
+			);
+		}
 		return clientPromise;
 	}
 
@@ -182,6 +205,13 @@
 		// Store raw OCR text
 		billStore.setRawOcrText(text);
 
+		// Put the scanned text in the editable text box so misreads can be fixed
+		// and re-parsed; show that tab.
+		manualText = text;
+		textFromScan = true;
+		inputMode = 'text';
+		cameraOpen = false;
+
 		// Parse the text into items
 		console.log('[OCR] Parsing text into items...');
 		const parseResult = parseReceiptText(text);
@@ -263,7 +293,7 @@
 				? 'bg-white text-gray-900 shadow-sm'
 				: 'text-gray-600 hover:text-gray-900'}"
 		>
-			Scan Image (Flash Recommended)
+			Scan Image
 		</button>
 		<button
 			onclick={() => {
@@ -283,14 +313,15 @@
 			{#if cameraOpen}
 				<CameraScanner
 					{getClient}
+					{loadProgress}
 					onclientdead={dropClient}
 					onfinish={handleCameraFinish}
 					oncancel={handleCameraCancel}
 					onfatal={handleCameraFatal}
 				/>
 			{:else if isLoadingScanner}
-				<div class="rounded-lg border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-600">
-					<span class="inline-block animate-spin">&#x21bb;</span> Loading scanner…
+				<div class="flex justify-center rounded-lg border border-gray-200 bg-gray-50 p-4">
+					<ScannerLoading progress={loadProgress} />
 				</div>
 			{:else}
 				<div class="flex gap-2">
@@ -373,10 +404,16 @@
 					{/if}
 				</div>
 
+				{#if textFromScan}
+					<p class="text-sm text-gray-600">
+						Scanned text below. Fix any misreads, then tap <strong>Parse Text</strong> to update the
+						items.
+					</p>
+				{/if}
 				<textarea
 					bind:value={manualText}
 					placeholder="Paste or type receipt text here...&#10;&#10;Example:&#10;Burger $12.99&#10;Fries $4.50&#10;Drink $2.99"
-					class="h-40 w-full resize-none rounded-lg border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+					class="h-40 w-full resize-y rounded-lg border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
 				></textarea>
 				<button
 					onclick={handleTextSubmit}
@@ -391,24 +428,6 @@
 		{#if scanError}
 			<div class="rounded-lg bg-red-50 p-3 text-sm text-red-700">
 				{scanError}
-			</div>
-		{/if}
-
-		<!-- Raw Input Text Toggle -->
-		{#if billStore.rawOcrText}
-			<div>
-				<button
-					onclick={() => (showRawText = !showRawText)}
-					class="flex w-full items-center justify-between rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200"
-				>
-					<span>Raw Input Text</span>
-					<span class="text-xs">{showRawText ? '▲' : '▼'}</span>
-				</button>
-
-				{#if showRawText}
-					<pre
-						class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">{billStore.rawOcrText}</pre>
-				{/if}
 			</div>
 		{/if}
 	</div>

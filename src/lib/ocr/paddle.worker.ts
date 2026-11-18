@@ -1,10 +1,12 @@
 /**
  * PaddleOCR (PP-OCRv5 mobile det + English rec) in a Web Worker on
  * onnxruntime-web. Protocol:
- *   in:  {type:'init', base}            out: {type:'ready', backend, alphabet} | {type:'error', message}
+ *   in:  {type:'init', base}            out: {type:'progress', progress}*, then
+ *                                            {type:'ready', backend, alphabet} | {type:'error', message}
  *   in:  {type:'frame', id, bitmap, opts?} out: {type:'result', id, result}      | {type:'error', id, message}
  */
 import * as ort from 'onnxruntime-web/webgpu';
+import { fetchAllWithProgress } from './download';
 import { parseDict, recognizeFrame, REC_HEIGHT, REC_MIN_WIDTH, type RunModel } from './paddlePre';
 import type { Backend, ProcessOptions, WorkerRequest, WorkerResponse } from './paddleProtocol';
 import type { FrameResult } from './session';
@@ -45,12 +47,12 @@ function runner(session: ort.InferenceSession): RunModel {
 }
 
 /** Creates both sessions on `backend` and warms them up; returns the rec class count. */
-async function load(base: string, backend: Backend) {
+async function load(detBytes: Uint8Array, recBytes: Uint8Array, backend: Backend) {
 	const opts: ort.InferenceSession.SessionOptions = { executionProviders: [backend] };
 	const sessions: ort.InferenceSession[] = [];
 	try {
-		sessions.push(await ort.InferenceSession.create(`${base}/models/det.onnx`, opts));
-		sessions.push(await ort.InferenceSession.create(`${base}/models/rec.onnx`, opts));
+		sessions.push(await ort.InferenceSession.create(detBytes, opts));
+		sessions.push(await ort.InferenceSession.create(recBytes, opts));
 		const [det, rec] = sessions.map(runner);
 		const probe = await rec(new Float32Array(3 * REC_HEIGHT * REC_MIN_WIDTH), [1, 3, REC_HEIGHT, REC_MIN_WIDTH]);
 		return { det, rec, C: probe.dims[2] };
@@ -68,15 +70,24 @@ async function init(base: string) {
 	if (!dictRes.ok) throw new Error(`failed to load dict.txt: HTTP ${dictRes.status}`);
 	const alphabet = parseDict(await dictRes.text());
 
+	// Download the big files ourselves so the UI can show a progress bar; ORT
+	// would otherwise fetch the wasm and models with no progress reporting.
+	const [detBytes, recBytes, wasm] = await fetchAllWithProgress(
+		[`${base}/models/det.onnx`, `${base}/models/rec.onnx`, `${base}/ort/ort-wasm-simd-threaded.jsep.wasm`],
+		(progress) => post({ type: 'progress', progress })
+	);
+	ort.env.wasm.wasmBinary = wasm;
+	post({ type: 'progress', progress: { stage: 'starting' } });
+
 	let backend: Backend = 'webgpu';
 	let loaded: Awaited<ReturnType<typeof load>>;
 	try {
 		if (!('gpu' in navigator)) throw new Error('WebGPU not available');
-		loaded = await load(base, 'webgpu');
+		loaded = await load(detBytes, recBytes, 'webgpu');
 	} catch (e) {
 		console.warn('[paddle] WebGPU failed, falling back to wasm:', errMessage(e));
 		backend = 'wasm';
-		loaded = await load(base, 'wasm');
+		loaded = await load(detBytes, recBytes, 'wasm');
 	}
 	// C must equal alphabet.length + 1 (CTC blank at class 0).
 	if (loaded.C !== alphabet.length + 1) {

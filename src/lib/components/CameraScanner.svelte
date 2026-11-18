@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { isClientDead, type OcrClient } from '$lib/ocr/client';
-	import { ScanSession, type SessionStatus } from '$lib/ocr/session';
+	import { ScanSession, type SessionStatus, type TrackState } from '$lib/ocr/session';
 	import { ScanFlow, containRect, fitLongSide } from '$lib/ocr/scanFlow';
 	import type { Recording } from '$lib/ocr/eval/replay';
+	import type { LoadProgress } from '$lib/ocr/client';
+	import ScannerLoading from './ScannerLoading.svelte';
 
 	interface Props {
 		/**
@@ -11,6 +13,8 @@
 		 * component never disposes it). Called only after the camera is granted.
 		 */
 		getClient: () => Promise<OcrClient>;
+		/** Progress of the parent's client load, for the loading bar. */
+		loadProgress?: LoadProgress | null;
 		/** The client's worker died: the parent drops it so `getClient` builds a fresh one. */
 		onclientdead: () => void;
 		onfinish: (text: string) => void;
@@ -18,14 +22,17 @@
 		oncancel: (message?: string) => void;
 		onfatal: (message: string) => void;
 	}
-	let { getClient, onclientdead, onfinish, oncancel, onfatal }: Props = $props();
+	let { getClient, loadProgress = null, onclientdead, onfinish, oncancel, onfatal }: Props = $props();
 
 	const CAMERA_ERROR = 'Camera unavailable. Upload a photo instead.';
 	const FATAL_ERROR = "Scanning isn't supported on this device";
 	// Tailwind palette: gray-400, amber-400, green-500
-	const COLOR_TENTATIVE = '#9ca3af';
-	const COLOR_CONFIRMED = '#fbbf24';
-	const COLOR_LOCKED = '#22c55e';
+	const COLORS: Record<TrackState, string> = {
+		tentative: '#9ca3af', // grey: still forming
+		ignored: 'rgba(255,255,255,0.35)', // faint: not an item line, not waited on
+		pending: '#fbbf24', // amber: item line, fusing
+		locked: '#22c55e' // green: item line, confident
+	};
 
 	const EMPTY_STATUS: SessionStatus = {
 		confirmed: 0,
@@ -279,14 +286,10 @@
 		// The video uses object-contain: map frame px to the letterboxed display rect.
 		const { scale, dx, dy } = containRect(frameW, frameH, cw, ch);
 		if (scale === 0) return;
-		ctx.lineWidth = 2;
-		for (const t of session?.tracks() ?? []) {
-			ctx.strokeStyle = !t.confirmed
-				? COLOR_TENTATIVE
-				: t.profile.isLocked()
-					? COLOR_LOCKED
-					: COLOR_CONFIRMED;
-			ctx.strokeRect(dx + t.box.x * scale, dy + t.box.y * scale, t.box.w * scale, t.box.h * scale);
+		for (const { box, state } of session?.overlay() ?? []) {
+			ctx.lineWidth = state === 'ignored' || state === 'tentative' ? 1 : 2;
+			ctx.strokeStyle = COLORS[state];
+			ctx.strokeRect(dx + box.x * scale, dy + box.y * scale, box.w * scale, box.h * scale);
 		}
 	}
 
@@ -388,9 +391,12 @@
 		<canvas bind:this={canvasEl} class="pointer-events-none absolute inset-0 h-full w-full"></canvas>
 
 		{#if phase === 'starting' && !cameraError}
-			<div class="absolute inset-0 flex items-center justify-center text-sm text-white/80">
-				<span class="mr-2 inline-block animate-spin">&#x21bb;</span>
-				{loadingScanner ? 'Loading scanner…' : 'Starting camera...'}
+			<div class="absolute inset-0 flex items-center justify-center px-6 text-sm text-white/80">
+				{#if loadingScanner}
+					<ScannerLoading progress={loadProgress} dark />
+				{:else}
+					<span class="mr-2 inline-block animate-spin">&#x21bb;</span> Starting camera...
+				{/if}
 			</div>
 		{/if}
 

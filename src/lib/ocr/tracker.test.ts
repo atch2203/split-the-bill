@@ -47,7 +47,21 @@ describe('Tracker', () => {
 		for (let i = 0; i < 9; i++) t.update(base());
 		const final = t.finalTracks();
 		expect(final.length).toBe(3);
-		expect(t.tracks.length).toBe(4);
+		// The ghost never confirmed and stopped matching, so it was pruned.
+		expect(t.tracks.length).toBe(3);
+	});
+
+	it('prunes tentative tracks unseen for more than pruneFrames, keeps confirmed ones', () => {
+		const t = new Tracker(ALPHABET, 640, 480);
+		for (let i = 0; i < 3; i++) t.update(base()); // base tracks confirm
+		t.update([...base(), fb(20, 300, 320, 20, 'GHOST 9.99')]);
+		for (let i = 0; i < 3; i++) t.update(base());
+		expect(t.tracks.length).toBe(4); // ghost unseen for 3 frames: kept
+		t.update(base());
+		expect(t.tracks.length).toBe(3); // unseen for 4: pruned
+		for (let i = 0; i < 10; i++) t.update([]);
+		expect(t.tracks.length).toBe(3); // confirmed tracks are never pruned
+		expect(t.tracks.every((tr) => tr.lastSeen === 8)).toBe(true);
 	});
 
 	it('ignores split boxes inside a track (review focus 1)', () => {

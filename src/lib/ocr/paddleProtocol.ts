@@ -1,3 +1,4 @@
+import type { LoadProgress } from './download';
 import type { FrameResult } from './session';
 
 /** Message protocol between client.ts and paddle.worker.ts. */
@@ -8,6 +9,7 @@ export interface ProcessOptions {
 	detMaxSide?: number;
 }
 export type WorkerResponse =
+	| { type: 'progress'; progress: LoadProgress }
 	| { type: 'ready'; backend: Backend; alphabet: string[] }
 	| { type: 'result'; id: number; result: FrameResult }
 	| { type: 'error'; id?: number; message: string };

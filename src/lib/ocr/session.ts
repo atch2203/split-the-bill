@@ -1,5 +1,5 @@
 import { assembleRows, type LineResult, type Row } from './rows';
-import { Tracker, type FrameBox, type Track, type TrackerConfig } from './tracker';
+import { Tracker, type Box, type FrameBox, type Track, type TrackerConfig } from './tracker';
 
 export interface FrameResult {
 	width: number;
@@ -7,12 +7,27 @@ export interface FrameResult {
 	boxes: FrameBox[];
 }
 export interface SessionStatus {
+	/** Confirmed, in-view lines the scan waits on (item/price rows; see `addFrame`). */
 	confirmed: number;
+	/** How many of those are locked. */
 	locked: number;
 	moved: boolean;
 	tooSmall: boolean;
 	done: boolean;
 }
+
+/** How a track is drawn: still forming, not waited on, waited on, or done. */
+export type TrackState = 'tentative' | 'ignored' | 'pending' | 'locked';
+export interface OverlayBox {
+	box: Box;
+	state: TrackState;
+}
+
+/** A price-like token: digits, a decimal mark, exactly two digits. */
+const PRICE = /\d[.,]\d{2}(?!\d)/;
+
+const yc = (b: Box) => b.y + b.h / 2;
+const sameRow = (a: Box, b: Box) => Math.abs(yc(a) - yc(b)) <= 0.5 * Math.max(a.h, b.h);
 
 function median(v: number[]): number {
 	const s = [...v].sort((a, b) => a - b);
@@ -25,14 +40,23 @@ export class ScanSession {
 	private settleMs: number;
 	private minTextPx: number;
 	private trackerCfg: Partial<TrackerConfig>;
+	private activeFrames: number;
 	private prevConfirmed = 0;
 	private lastConfirmAt = 0;
+	private required = new Set<Track>();
 
 	constructor(
 		private alphabet: string[],
-		opts: { settleMs?: number; minTextPx?: number; tracker?: Partial<TrackerConfig> } = {}
+		opts: {
+			settleMs?: number;
+			minTextPx?: number;
+			/** Confirmed tracks unseen for this many frames no longer hold up the scan. */
+			activeFrames?: number;
+			tracker?: Partial<TrackerConfig>;
+		} = {}
 	) {
-		this.settleMs = opts.settleMs ?? 1000;
+		this.settleMs = opts.settleMs ?? 500;
+		this.activeFrames = opts.activeFrames ?? 10;
 		this.minTextPx = opts.minTextPx ?? 16;
 		this.trackerCfg = opts.tracker ?? {};
 	}
@@ -40,9 +64,20 @@ export class ScanSession {
 	addFrame(r: FrameResult, nowMs: number): SessionStatus {
 		this.tracker ??= new Tracker(this.alphabet, r.width, r.height, this.trackerCfg);
 		const { moved } = this.tracker.update(r.boxes);
-		const conf = this.tracker.tracks.filter((t) => t.confirmed);
-		const confirmed = conf.length;
-		const locked = conf.filter((t) => t.profile.isLocked()).length;
+		const frame = this.tracker.frameIndex;
+		// Lines out of view (camera moved) can't improve, so they don't hold up the scan.
+		const active = this.tracker.tracks.filter(
+			(t) => t.confirmed && frame - t.lastSeen < this.activeFrames
+		);
+		// Only rows with a price are waited on (items, tax, totals); store name,
+		// address, dates and footers don't block. Without any price yet, wait on all.
+		const priced = active.filter((t) => PRICE.test(t.profile.readout()));
+		const required = priced.length
+			? active.filter((t) => priced.some((p) => sameRow(t.box, p.box)))
+			: active;
+		this.required = new Set(required);
+		const confirmed = required.length;
+		const locked = required.filter((t) => t.profile.isLocked()).length;
 		if (confirmed > this.prevConfirmed) this.lastConfirmAt = nowMs;
 		this.prevConfirmed = confirmed;
 		const tooSmall =
@@ -65,5 +100,23 @@ export class ScanSession {
 
 	tracks(): readonly Track[] {
 		return this.tracker?.tracks ?? [];
+	}
+
+	/** Boxes to draw: only tracks matched in the last 2 frames, so stale boxes don't linger. */
+	overlay(): OverlayBox[] {
+		if (!this.tracker) return [];
+		const frame = this.tracker.frameIndex;
+		return this.tracker.tracks
+			.filter((t) => frame - t.lastSeen < 2)
+			.map((t) => ({
+				box: t.box,
+				state: !t.confirmed
+					? 'tentative'
+					: !this.required.has(t)
+						? 'ignored'
+						: t.profile.isLocked()
+							? 'locked'
+							: 'pending'
+			}));
 	}
 }

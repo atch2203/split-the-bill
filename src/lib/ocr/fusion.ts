@@ -27,8 +27,8 @@ export const DEFAULT_FUSION_CONFIG: FusionConfig = {
 	pMiss: 0.1,
 	gapIns: -4,
 	gapDel: -4,
-	lockTau: 0.95,
-	priceLockTau: 0.98,
+	lockTau: 0.9,
+	priceLockTau: 0.95,
 	minFrames: 3,
 	initEpsLogit: -3
 };

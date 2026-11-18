@@ -178,11 +178,12 @@
 				</span>
 			</div>
 		{/if}
+		<!-- Tax/tip are bill-wide (often set right after a scan), so they don't wait on "done selecting". -->
+		<div data-tour="settings">
+			<SettingsPanel />
+		</div>
 		<DoneSelectingButton />
 		{#if showTotals}
-			<div data-tour="settings">
-				<SettingsPanel />
-			</div>
 			<div data-tour="summary">
 				<PaymentSummary />
 			</div>
