@@ -23,6 +23,18 @@ describe('detPostprocess', () => {
 		expect(b.y + b.h).toBeLessThanOrEqual(50);
 	});
 
+	it('unclips by d = area * unclipRatio / perimeter on every side', () => {
+		// 40x10 block: d = 400 * 1.5 / 100 = 6
+		const [b] = detPostprocess(map(100, 50, [[10, 20, 40, 10, 0.9]]), 100, 50);
+		expect(b).toEqual({ x: 4, y: 14, w: 52, h: 22 });
+	});
+
+	it('honours a custom unclipRatio', () => {
+		// d = 400 * 1 / 100 = 4
+		const [b] = detPostprocess(map(100, 50, [[10, 20, 40, 10, 0.9]]), 100, 50, { unclipRatio: 1 });
+		expect(b).toEqual({ x: 6, y: 16, w: 48, h: 18 });
+	});
+
 	it('returns two boxes for two separated blocks', () => {
 		const boxes = detPostprocess(
 			map(100, 50, [
@@ -44,8 +56,8 @@ describe('detPostprocess', () => {
 	});
 
 	it('clamps a box touching the image edge', () => {
+		// d = 6: left/top clamp to 0, right/bottom = 40 + 6, 10 + 6
 		const [b] = detPostprocess(map(100, 50, [[0, 0, 40, 10, 0.9]]), 100, 50);
-		expect(b.x).toBe(0);
-		expect(b.y).toBe(0);
+		expect(b).toEqual({ x: 0, y: 0, w: 46, h: 16 });
 	});
 });

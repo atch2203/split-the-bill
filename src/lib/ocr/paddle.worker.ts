@@ -88,9 +88,9 @@ async function init(base: string) {
 }
 
 async function processFrame(bitmap: ImageBitmap): Promise<FrameResult> {
-	if (!models) throw new Error('worker not initialized');
 	const { width: W, height: H } = bitmap;
 	try {
+		if (!models) throw new Error('worker not initialized');
 		const canvas = new OffscreenCanvas(W, H);
 		const c2d = canvas.getContext('2d', { willReadFrequently: true });
 		if (!c2d) throw new Error('OffscreenCanvas 2d context unavailable');

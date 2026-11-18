@@ -8,7 +8,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"test": "vitest run",
-		"prepare": "node scripts/copy-ort.mjs && svelte-kit sync || echo ''",
+		"prepare": "(svelte-kit sync || echo '') && node scripts/copy-ort.mjs",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"smoke:ocr": "node scripts/smoke-ocr.mjs"
