@@ -33,7 +33,7 @@
 	let videoEl: HTMLVideoElement;
 	let canvasEl: HTMLCanvasElement;
 
-	let phase = $state<'starting' | 'scanning' | 'between'>('starting');
+	let phase = $state<'starting' | 'scanning' | 'between' | 'ended'>('starting');
 	let status = $state<SessionStatus>({ ...EMPTY_STATUS });
 	let part = $state(1);
 	let cameraError = $state<string | null>(null);
@@ -64,7 +64,10 @@
 		void startCamera();
 	});
 
-	onDestroy(teardown);
+	onDestroy(() => {
+		flow.end(); // unmounted: no callback may fire afterwards
+		teardown();
+	});
 
 	async function startCamera() {
 		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
@@ -98,7 +101,6 @@
 		} catch (err) {
 			if (stopped) return;
 			console.warn('[camera] video.play failed', err);
-			teardown();
 			cameraFailed();
 			return;
 		}
@@ -109,8 +111,24 @@
 
 	function cameraFailed() {
 		cameraError = CAMERA_ERROR;
+		terminate(() => oncancel(CAMERA_ERROR));
+	}
+
+	/**
+	 * The single exit: claims the terminal transition (so exactly one of
+	 * onfinish / oncancel / onfatal ever fires), tears down, then calls `cb`.
+	 */
+	function terminate(cb: () => void) {
+		if (!flow.end()) return;
 		teardown();
-		oncancel(CAMERA_ERROR);
+		phase = 'ended';
+		cb();
+	}
+
+	/** A frame failed (bitmap capture or `process`): retry, or go fatal. */
+	function frameFailed(what: string, err: unknown) {
+		console.warn(`[camera] ${what} failed`, err);
+		if (flow.onFrameError() === 'fatal') terminate(() => onfatal(FATAL_ERROR));
 	}
 
 	function startLoop() {
@@ -157,7 +175,7 @@
 			try {
 				bitmap = await createImageBitmap(videoEl);
 			} catch (err) {
-				console.warn('[camera] createImageBitmap failed', err);
+				if (myGen === gen) frameFailed('createImageBitmap', err);
 				return;
 			}
 			if (myGen !== gen) {
@@ -176,12 +194,7 @@
 			try {
 				result = await client.process(bitmap); // transfers + closes the bitmap
 			} catch (err) {
-				if (myGen !== gen) return;
-				console.warn('[camera] process failed', err);
-				if (flow.onFrameError() === 'fatal') {
-					teardown();
-					onfatal(FATAL_ERROR);
-				}
+				if (myGen === gen) frameFailed('process', err);
 				return;
 			}
 			if (myGen !== gen) return;
@@ -240,7 +253,9 @@
 		stopLoop();
 		flow.endPart(session.rows());
 		phase = 'between';
-		clearOverlay();
+		// Freeze the frame so the last overlay stays aligned with what was scanned.
+		// The stream keeps running, so the next part starts without re-prompting.
+		videoEl?.pause();
 	}
 
 	function scanNextPart() {
@@ -249,19 +264,19 @@
 		part = flow.part;
 		session = new ScanSession(client.alphabet);
 		status = { ...EMPTY_STATUS };
+		clearOverlay();
 		phase = 'scanning';
+		videoEl?.play().catch((err) => console.warn('[camera] video.play failed', err));
 		startLoop();
 	}
 
 	function finish() {
 		const text = flow.finishText();
-		teardown();
-		onfinish(text);
+		terminate(() => onfinish(text));
 	}
 
 	function cancel() {
-		teardown();
-		oncancel();
+		terminate(() => oncancel());
 	}
 
 	/** Idempotent: stop camera tracks and loop, ignore pending results. */
@@ -351,7 +366,7 @@
 		{status.locked}/{status.confirmed} lines locked
 	</p>
 
-	<div class="flex gap-2">
+	<div class="flex gap-2" class:hidden={phase === 'ended'}>
 		<button
 			onclick={cancel}
 			class="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100"

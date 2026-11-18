@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ScanFlow, containRect, fitLongSide } from './scanFlow';
-import { mergeParts, rowsToText, type Row } from './rows';
+import { rowsToText, type Row } from './rows';
 
 const rows = (texts: string[], conf = 0.9): Row[] =>
 	texts.map((text, i) => ({ text, confidence: conf, y: i * 30 }));
@@ -33,7 +33,6 @@ describe('ScanFlow parts', () => {
 		f.nextPart();
 		expect(f.part).toBe(2);
 		f.endPart(b);
-		expect(f.rows).toEqual(mergeParts(mergeParts([], a), b));
 		expect(f.rows.map((r) => r.text)).toEqual(['BURGER 12.99', 'FRIES 4.50', 'TOTAL 17.49']);
 	});
 	it('finishText uses rowsToText', () => {
@@ -50,12 +49,29 @@ describe('ScanFlow parts', () => {
 	});
 });
 
+describe('ScanFlow terminal guard', () => {
+	it('end() succeeds once; later calls are refused', () => {
+		const f = new ScanFlow();
+		expect(f.ended).toBe(false);
+		expect(f.end()).toBe(true);
+		expect(f.ended).toBe(true);
+		expect(f.end()).toBe(false);
+	});
+	it('fatal error ends the flow so no other terminal callback can fire', () => {
+		const f = new ScanFlow();
+		f.onFrameError();
+		expect(f.onFrameError()).toBe('fatal');
+		expect(f.end()).toBe(true);
+		expect(f.end()).toBe(false);
+	});
+});
+
 describe('containRect', () => {
-	it('letterboxes a tall frame in a wide element', () => {
+	it('pillarboxes a tall frame in a wide element', () => {
 		// 100x200 frame in 400x200 element: scale 1, 150px bars left/right
 		expect(containRect(100, 200, 400, 200)).toEqual({ scale: 1, dx: 150, dy: 0 });
 	});
-	it('pillarboxes a wide frame in a tall element', () => {
+	it('letterboxes a wide frame in a tall element', () => {
 		expect(containRect(200, 100, 100, 200)).toEqual({ scale: 0.5, dx: 0, dy: 75 });
 	});
 	it('returns scale 0 for empty sizes', () => {

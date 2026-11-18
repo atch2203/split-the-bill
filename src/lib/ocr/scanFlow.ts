@@ -11,6 +11,7 @@ export class ScanFlow {
 	private _rows: Row[] = [];
 	private _part = 1;
 	private errors = 0;
+	private _ended = false;
 
 	get part(): number {
 		return this._part;
@@ -40,6 +41,21 @@ export class ScanFlow {
 	nextPart(): void {
 		this._part++;
 		this.errors = 0;
+	}
+
+	/** True once a terminal callback (finish, cancel, fatal) has been claimed. */
+	get ended(): boolean {
+		return this._ended;
+	}
+
+	/**
+	 * Claim the single terminal transition. Returns true only on the first
+	 * call, so exactly one of onfinish / oncancel / onfatal ever fires.
+	 */
+	end(): boolean {
+		if (this._ended) return false;
+		this._ended = true;
+		return true;
 	}
 
 	finishText(): string {
