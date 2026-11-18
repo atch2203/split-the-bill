@@ -107,7 +107,11 @@ export class Tracker {
 					best = t;
 				}
 			}
-			if (best && bestIou >= c.iouMin) {
+			if (
+				best &&
+				bestIou >= c.iouMin &&
+				textSim(b.text, best.profile.readout()) >= c.textSimMin
+			) {
 				const a = centre(best.box);
 				const n = centre(b.box);
 				dxs.push(n.x - a.x);
@@ -149,10 +153,9 @@ export class Tracker {
 			if (usedB.has(bi)) return;
 			const ab = area(b.box);
 			for (const t of this._tracks) {
-				for (const tb of [t.box, shifted(t.box)]) {
-					const i = intersection(b.box, tb);
-					if (i >= c.containFrac * ab || i >= c.containFrac * area(tb)) return;
-				}
+				const tb = shifted(t.box);
+				const i = intersection(b.box, tb);
+				if (i >= c.containFrac * ab || i >= c.containFrac * area(tb)) return;
 			}
 			this._tracks.push({
 				id: this.nextId++,
