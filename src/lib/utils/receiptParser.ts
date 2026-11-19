@@ -6,6 +6,8 @@ interface PendingItem {
 	quantity: number;
 	unitPrice: number | null;
 	lineTotal: number | null;
+	/** Add-on prices for the whole line, spread over the quantity when built. */
+	addOns: number;
 }
 
 export interface ParseResult {
@@ -15,6 +17,8 @@ export interface ParseResult {
 	total: number | null;
 	tipAmount: number | null;
 }
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // Generate unique ID
 function generateId(): string {
@@ -30,6 +34,7 @@ function buildItem(pending: PendingItem): ReceiptItem | null {
 		price = Math.round((pending.lineTotal / pending.quantity) * 100) / 100;
 	}
 	if (price === null || price <= 0) return null;
+	price = round2(price + pending.addOns / pending.quantity);
 	return {
 		id: generateId(),
 		name: pending.name,
@@ -123,13 +128,35 @@ export function parseReceiptText(text: string): ParseResult {
 				if (qtyStash !== null || pending === null) {
 					// A stashed quantity signals a new item, or there's no pending one.
 					flushPending();
-					pending = { name: line.name, quantity: qtyStash ?? line.quantity, unitPrice: null, lineTotal: null };
+					pending = {
+						name: line.name,
+						quantity: qtyStash ?? line.quantity,
+						unitPrice: null,
+						lineTotal: null,
+						addOns: 0
+					};
 					qtyStash = null;
 				} else {
 					// Pending item has no price yet: this continues its name.
 					pending.name += ' ' + line.name;
 				}
 				break;
+			case 'modifier': {
+				// Folds into the item it belongs to: the one still being read, else
+				// the last finished one. Its price is for the whole line.
+				const suffix = ` ${line.sign} ${line.name}`;
+				const last = items.at(-1);
+				if (pending !== null) {
+					pending.name += suffix;
+					pending.addOns += line.price ?? 0;
+				} else if (last) {
+					last.name += suffix;
+					last.price = round2(last.price + (line.price ?? 0) / last.quantity);
+				} else if (line.price !== null) {
+					items.push({ id: generateId(), name: line.name, price: line.price, quantity: 1, assignedTo: [] });
+				}
+				break;
+			}
 			case 'other':
 				// Noise between a name and its price leaves the pending item intact.
 				break;

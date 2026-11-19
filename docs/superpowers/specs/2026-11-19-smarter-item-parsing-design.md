@@ -48,10 +48,20 @@ A subtotal-consistency check was offered and declined.
    a size never becomes a quantity; a code + price line acts as a price line.
 4. `parseReceiptText(text): ParseResult` is unchanged; no caller changes.
 
+## Added scope (round 2)
+
+- Trailing tax/department flags (1–2 capital letters after the price: `3.48 N`,
+  `12.49 TX`) are dropped.
+- Add-ons fold into the item above (user's choice): lines starting with `+`, `Add`,
+  `w/` add their name and price (spread per unit for multi-quantity items);
+  `- No Onion` lines add only the name. `Extra ...` is not an add-on, since it is
+  often a real item (`Extra Large Pizza`). An add-on with no item above becomes its
+  own item when it has a price.
+
 ## Non-goals
 
-Subtotal check, box geometry, discounts / negative prices, trailing tax-flag letters
-(`7.99 T`).
+Subtotal check, box geometry, discounts / negative prices (user's preference if
+added later: a separate negative item).
 
 ## Test data
 

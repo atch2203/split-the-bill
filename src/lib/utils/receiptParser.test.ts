@@ -126,3 +126,59 @@ describe('parseReceiptText: sizes and item codes', () => {
 		]);
 	});
 });
+
+describe('parseReceiptText: tax/flag letters after the price', () => {
+	it('drops a 1–2 letter flag after the price', () => {
+		expect(items('GV MILK  3.48 N\nBURGER 7.99 T\nPAPER TOWELS  12.49 TX\nBANANAS\n1.36 F')).toEqual([
+			['GV MILK', 1, 3.48],
+			['BURGER', 1, 7.99],
+			['PAPER TOWELS', 1, 12.49],
+			['BANANAS', 1, 1.36]
+		]);
+	});
+
+	it('with an item code and a flag', () => {
+		expect(items('KS WATER 1234567  4.99 A')).toEqual([['KS WATER', 1, 4.99]]);
+	});
+
+	it('a trailing word that is part of the name is kept', () => {
+		expect(items('VITAMIN C  12.99')).toEqual([['VITAMIN C', 1, 12.99]]);
+	});
+});
+
+describe('parseReceiptText: add-ons fold into the item above', () => {
+	it('"+", "Add" and "w/" lines add their price and name', () => {
+		expect(items('Latte  4.75\n+ Oat Milk  0.75\nAdd Extra Shot 1.00\nBagel 3.00\nw/ Cream Cheese 0.50')).toEqual([
+			['Latte + Oat Milk + Extra Shot', 1, 6.5],
+			['Bagel + Cream Cheese', 1, 3.5]
+		]);
+	});
+
+	it('free modifiers only change the name', () => {
+		expect(items('Burger  12.99\n- No Onion\n+ Well Done\nFries 4.50')).toEqual([
+			['Burger - No Onion + Well Done', 1, 12.99],
+			['Fries', 1, 4.5]
+		]);
+	});
+
+	it('an add-on on a multi-quantity item is split per unit', () => {
+		expect(items('2 Latte  9.50\n+ Oat Milk  1.50')).toEqual([['Latte + Oat Milk', 2, 5.5]]);
+	});
+
+	it('an add-on after a two-line item attaches to it', () => {
+		expect(items('Grilled Chicken Sandwich\n11.50\n+ Bacon 2.00')).toEqual([
+			['Grilled Chicken Sandwich + Bacon', 1, 13.5]
+		]);
+	});
+
+	it('"Extra ..." is a normal item, not an add-on', () => {
+		expect(items('Burger  12.99\nExtra Large Pizza  14.99')).toEqual([
+			['Burger', 1, 12.99],
+			['Extra Large Pizza', 1, 14.99]
+		]);
+	});
+
+	it('with no item above, an add-on line is its own item', () => {
+		expect(items('+ Oat Milk  0.75')).toEqual([['Oat Milk', 1, 0.75]]);
+	});
+});

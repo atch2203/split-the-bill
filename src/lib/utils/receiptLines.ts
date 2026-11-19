@@ -390,6 +390,24 @@ export function stripItemCodes(line: string): string {
 	return parts.join('').trim();
 }
 
+/** A 1–2 letter tax/department flag after the price: "3.48 N", "7.99 T", "12.49 TX". */
+const TRAILING_FLAG = /(\d[.,]\d{2})\s+[A-Z]{1,2}$/;
+
+/** Add-on prefixes: "+ Oat Milk", "Add Bacon", "w/ Cream Cheese"; "- No Onion" (free). */
+const MODIFIER = /^(?:(\+|add\b|w\/)|(-)(?=\s*[a-z]))\s*(.+)$/i;
+
+function parseModifier(line: string): ReceiptLine | null {
+	const m = line.match(MODIFIER);
+	if (!m) return null;
+	const sign = m[2] ? '-' : '+';
+	const rest = m[3].trim();
+	const priced = rest.match(/^(.+?)\s+\$?(\d+[.,]\d{2})$/);
+	const name = (priced ? priced[1] : rest).trim();
+	if ((name.match(/[a-z]/gi) ?? []).length < 2) return null;
+	const price = priced ? normalizePrice(priced[2]) : null;
+	return { kind: 'modifier', sign, name, price };
+}
+
 export type SummaryField = 'tax' | 'subtotal' | 'total' | 'tip';
 
 /** What one receipt line is, on its own. `parseReceiptText` combines these. */
@@ -406,6 +424,8 @@ export type ReceiptLine =
 	| { kind: 'price'; price: number }
 	/** An item name (or part of one) without a price. */
 	| { kind: 'name'; name: string; quantity: number }
+	/** "+ Oat Milk 0.75", "- No Onion": belongs to the item above. `price` null = free. */
+	| { kind: 'modifier'; sign: '+' | '-'; name: string; price: number | null }
 	/** Blank, header/footer noise, or unrecognized. */
 	| { kind: 'other' };
 
@@ -432,8 +452,10 @@ export function classifyLine(raw: string): ReceiptLine {
 		if (labels.some((p) => p.test(trimmed))) return { kind: 'summary', field, value: null };
 	}
 
-	const line = stripItemCodes(trimmed);
+	const line = stripItemCodes(trimmed.replace(TRAILING_FLAG, '$1'));
 	if (!line) return { kind: 'other' };
+	const modifier = parseModifier(line);
+	if (modifier) return modifier;
 	const item = parseLine(line);
 	if (item) return { kind: 'item', name: item.name, quantity: item.quantity, price: item.price };
 	const qtyUnit = isQtyUnitLine(line);
