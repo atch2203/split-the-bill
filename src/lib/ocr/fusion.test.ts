@@ -13,9 +13,15 @@ describe('LineProfile', () => {
 		expect(lp.isLocked()).toBe(true);
 	});
 
-	it('not locked early', () => {
+	it('not locked after one frame, locked after minFrames (2) agreeing frames', () => {
 		const lp = profile('BURGER');
+		expect(lp.isLocked()).toBe(false);
 		lp.observe(obs('BURGER'));
+		expect(lp.isLocked()).toBe(true);
+	});
+
+	it('one very confident frame alone never locks', () => {
+		const lp = profile('12.99', 0.999);
 		expect(lp.isLocked()).toBe(false);
 	});
 
