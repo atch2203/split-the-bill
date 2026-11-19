@@ -75,13 +75,29 @@
 	let recCount = $state(0);
 	let recFrames: string[] | null = null;
 
+	/** Last frame size drawn, so the overlay can be redrawn on resize/rotate. */
+	let lastFrame: { w: number; h: number } | null = null;
+	let prevBodyOverflow = '';
+
+	function redraw() {
+		if (lastFrame) drawOverlay(lastFrame.w, lastFrame.h);
+	}
+
 	onMount(() => {
+		// Full-screen view: the page behind it must not scroll.
+		prevBodyOverflow = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		window.addEventListener('resize', redraw);
 		void startCamera();
 	});
 
 	onDestroy(() => {
 		flow.end(); // unmounted: no callback may fire afterwards
 		teardown();
+		if (typeof document !== 'undefined') {
+			document.body.style.overflow = prevBodyOverflow;
+			window.removeEventListener('resize', redraw);
+		}
 	});
 
 	/**
@@ -269,6 +285,7 @@
 	}
 
 	function drawOverlay(frameW: number, frameH: number) {
+		lastFrame = { w: frameW, h: frameH };
 		if (!canvasEl || !videoEl) return;
 		const dpr = window.devicePixelRatio || 1;
 		const cw = videoEl.clientWidth;
@@ -378,17 +395,50 @@
 	}
 </script>
 
-<div class="space-y-3">
-	<div class="relative overflow-hidden rounded-lg border border-gray-200 bg-black">
+<!-- Full-screen camera: video fills the viewport (object-contain, so the
+     overlay maps 1:1 to what's scanned); controls float over it. -->
+<div
+	class="fixed inset-0 z-50 flex flex-col bg-black text-white"
+	style="height: 100dvh"
+	role="dialog"
+	aria-modal="true"
+	aria-label="Scan receipt"
+>
+	<div class="relative min-h-0 flex-1">
 		<!-- svelte-ignore a11y_media_has_caption -->
 		<video
 			bind:this={videoEl}
 			playsinline
 			muted
 			autoplay
-			class="block h-[60vh] max-h-[32rem] w-full object-contain"
+			class="absolute inset-0 h-full w-full object-contain"
 		></video>
 		<canvas bind:this={canvasEl} class="pointer-events-none absolute inset-0 h-full w-full"></canvas>
+
+		<!-- Top bar -->
+		<div
+			class="absolute inset-x-0 top-0 flex items-center justify-between gap-2 bg-gradient-to-b from-black/70 to-transparent px-4 pb-6"
+			style="padding-top: max(0.75rem, env(safe-area-inset-top))"
+		>
+			<button
+				onclick={cancel}
+				class="rounded-full bg-black/50 px-3 py-1.5 text-sm font-medium backdrop-blur hover:bg-black/70"
+				class:invisible={phase === 'ended'}
+				aria-label="Close scanner"
+			>
+				&#x2715; Close
+			</button>
+			<div class="flex items-center gap-2 text-sm">
+				{#if part > 1}
+					<span class="rounded-full bg-black/50 px-3 py-1.5 font-medium backdrop-blur">Part {part}</span>
+				{/if}
+				{#if phase === 'scanning' || phase === 'between'}
+					<span class="rounded-full bg-black/50 px-3 py-1.5 backdrop-blur">
+						{status.locked}/{status.confirmed} lines locked
+					</span>
+				{/if}
+			</div>
+		</div>
 
 		{#if phase === 'starting' && !cameraError}
 			<div class="absolute inset-0 flex items-center justify-center px-6 text-sm text-white/80">
@@ -400,55 +450,50 @@
 			</div>
 		{/if}
 
-		{#if part > 1}
+		{#if phase === 'scanning' && (status.moved || status.tooSmall)}
 			<div
-				class="absolute top-2 left-2 rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white"
+				class="absolute inset-x-0 bottom-4 mx-auto w-fit rounded-full bg-black/70 px-4 py-1.5 text-sm font-medium"
 			>
-				Part {part}
+				{status.moved ? 'Hold steady' : 'Move closer; scan in parts'}
 			</div>
 		{/if}
 
-		{#if phase === 'scanning' && (status.moved || status.tooSmall)}
+		{#if phase === 'between'}
 			<div
-				class="absolute inset-x-0 bottom-2 mx-auto w-fit rounded-md bg-black/70 px-3 py-1 text-sm font-medium text-white"
+				class="absolute inset-x-0 bottom-4 mx-auto w-fit max-w-[90%] rounded-full bg-black/70 px-4 py-1.5 text-center text-sm"
 			>
-				{status.moved ? 'Hold steady' : 'Move closer; scan in parts'}
+				Part {part} captured. Scan the rest, or finish.
 			</div>
 		{/if}
 	</div>
 
 	{#if cameraError}
-		<div class="rounded-lg bg-red-50 p-3 text-sm text-red-700">{cameraError}</div>
+		<div class="bg-red-600/90 px-4 py-3 text-sm">{cameraError}</div>
 	{/if}
 
-	<p class="text-center text-sm text-gray-600">
-		{status.locked}/{status.confirmed} lines locked
-	</p>
-
-	<div class="flex gap-2" class:hidden={phase === 'ended'}>
-		<button
-			onclick={cancel}
-			class="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100"
-		>
-			Cancel
-		</button>
+	<!-- Bottom controls -->
+	<div
+		class="flex gap-2 bg-black px-4 pt-3"
+		class:hidden={phase === 'ended'}
+		style="padding-bottom: max(1rem, env(safe-area-inset-bottom))"
+	>
 		{#if phase === 'between'}
 			<button
 				onclick={scanNextPart}
-				class="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+				class="flex-1 rounded-xl border border-white/30 px-4 py-3 text-base font-medium hover:bg-white/10"
 			>
 				Scan next part
 			</button>
 			<button
 				onclick={finish}
-				class="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+				class="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-base font-medium hover:bg-blue-700"
 			>
 				Finish
 			</button>
 		{:else}
 			<button
 				onclick={endPart}
-				class="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+				class="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-base font-medium hover:bg-blue-700"
 			>
 				Done
 			</button>
@@ -456,9 +501,9 @@
 		{#if import.meta.env.DEV}
 			<button
 				onclick={toggleRecord}
-				class="rounded-lg border px-3 py-2 text-xs transition-colors {recording
-					? 'border-red-400 bg-red-50 text-red-700'
-					: 'border-gray-300 text-gray-600 hover:bg-gray-100'}"
+				class="rounded-xl border px-3 py-3 text-xs {recording
+					? 'border-red-400 bg-red-600/30 text-red-200'
+					: 'border-white/30 hover:bg-white/10'}"
 			>
 				{recording ? `Stop (${recCount})` : 'Record'}
 			</button>
