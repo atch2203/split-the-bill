@@ -182,3 +182,96 @@ describe('parseReceiptText: add-ons fold into the item above', () => {
 		expect(items('+ Oat Milk  0.75')).toEqual([['Oat Milk', 1, 0.75]]);
 	});
 });
+
+describe('parseReceiptText: real-world layouts', () => {
+	it('summary labels after a date, time, percentage or asterisks', () => {
+		const r = parseReceiptText('1 Burger  12.99\n18% TIP  2.34\n01/02 19:30 TOTAL :  16.37\n**** BALANCE  16.37');
+		expect(r.items.map((i) => i.name)).toEqual(['Burger']);
+		expect([r.tipAmount, r.total]).toEqual([2.34, 16.37]);
+	});
+
+	it('BALANCE is the total; service charges count as tip', () => {
+		expect(parseReceiptText('Soup  5.00\n*** BALANCE  5.40').total).toBe(5.4);
+		expect(parseReceiptText('Soup  5.00\nCharge(20%):  $1.00').tipAmount).toBe(1);
+		expect(parseReceiptText('Soup  5.00\nLarge Party (18.00%)  $0.90').tipAmount).toBe(0.9);
+		expect(parseReceiptText('Soup  5.00\n18% Gratuity:  0.90').tipAmount).toBe(0.9);
+	});
+
+	it('nothing after the total is an item', () => {
+		expect(items('Soup  5.00\nTotal  5.00\nAmount  $5.00\nCustom Tip  $1.00')).toEqual([['Soup', 1, 5]]);
+	});
+
+	it('"Price  You Pay" columns: the last price is paid; a misread flag digit is dropped', () => {
+		expect(items('5550001 CEREAL BOX  7.99  6.99 S\n5550002 JAM JAR  3.49  3.00 5')).toEqual([
+			['CEREAL BOX', 1, 6.99],
+			['JAM JAR', 1, 3]
+		]);
+	});
+
+	it('"N @ unit   total" with the name above', () => {
+		expect(items('LEMON SODA 12OZ\n1 @ $7.99      $7.99\nGINGER ALE\n2 @ $2.50  $5.00')).toEqual([
+			['LEMON SODA 12OZ', 1, 7.99],
+			['GINGER ALE', 2, 2.5]
+		]);
+	});
+
+	it('menu numbers are dropped from names', () => {
+		expect(items('2 99.Grilled Pork Roll  12.90\n1 A19. Mango Rice  9.95\nM5 Tofu Stew  8.50')).toEqual([
+			['Grilled Pork Roll', 2, 6.45],
+			['Mango Rice', 1, 9.95],
+			['Tofu Stew', 1, 8.5]
+		]);
+	});
+
+	it('quantity + price, then the name on the next line', () => {
+		expect(items('1 M5   16.95\nM5 Tofu Hot Pot\n2 H9   20.00\nH9 Beef Pot')).toEqual([
+			['Tofu Hot Pot', 1, 16.95],
+			['Beef Pot', 2, 10]
+		]);
+	});
+
+	it('a wrapped name continues on the price line', () => {
+		expect(items('1 Vegetable & Pork Spicy\nWontons  $15.00\n1 Pork Bun  $8.00')).toEqual([
+			['Vegetable & Pork Spicy Wontons', 1, 15],
+			['Pork Bun', 1, 8]
+		]);
+	});
+
+	it('bare option lines under a quantity-style item join its name', () => {
+		const text = '1 Pad Thai  $18.95\nChicken\nMedium\n1 Thai Tea  $5.00\n1 Curry  $16.00\nPork\n1 Fried Rice\n$20.95';
+		expect(items(text)).toEqual([
+			['Pad Thai Chicken Medium', 1, 18.95],
+			['Thai Tea', 1, 5],
+			['Curry Pork', 1, 16],
+			['Fried Rice', 1, 20.95]
+		]);
+	});
+
+	it('a bare name before a priced add-on starts a new item', () => {
+		const text = '1 Noodles  10.95\n-Beef  2.00\n1 Soup  5.00\n1 Tea  3.00\nFried Rice\n-Chicken  11.45';
+		expect(items(text)).toEqual([
+			['Noodles - Beef', 1, 12.95],
+			['Soup', 1, 5],
+			['Tea', 1, 3],
+			['Fried Rice - Chicken', 1, 11.45]
+		]);
+	});
+
+	it('header numbers are not prices', () => {
+		expect(items('DIN TAI\n600 Pine St.\n1403\nREGISTER CHANNEL  44\n1 Dumplings  $16.50')).toEqual([
+			['Dumplings', 1, 16.5]
+		]);
+	});
+
+	it('a glued or misread leading 1 is a quantity', () => {
+		expect(items('1Thunderbird Chicken  13.99\nI Pad Thai  9.95')).toEqual([
+			['Thunderbird Chicken', 1, 13.99],
+			['Pad Thai', 1, 9.95]
+		]);
+	});
+
+	it('garbled or counted subtotal labels', () => {
+		expect(parseReceiptText('Soup  5.00\nSubTural:  5.00').subtotal).toBe(5);
+		expect(parseReceiptText('Soup  5.00\nSubtotal (7)  60.83').subtotal).toBe(60.83);
+	});
+});

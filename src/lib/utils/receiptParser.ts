@@ -1,5 +1,5 @@
 import type { ReceiptItem } from '$lib/types';
-import { classifyLine, type SummaryField } from './receiptLines';
+import { classifyLine, type ReceiptLine, type SummaryField } from './receiptLines';
 
 interface PendingItem {
 	name: string;
@@ -8,6 +8,8 @@ interface PendingItem {
 	lineTotal: number | null;
 	/** Add-on prices for the whole line, spread over the quantity when built. */
 	addOns: number;
+	/** Started by a line with a quantity ("1 Vegetable & Pork Spicy"). */
+	hasQty: boolean;
 }
 
 export interface ParseResult {
@@ -33,8 +35,13 @@ function buildItem(pending: PendingItem): ReceiptItem | null {
 	} else if (pending.lineTotal !== null) {
 		price = Math.round((pending.lineTotal / pending.quantity) * 100) / 100;
 	}
+	if (price === null && pending.addOns > 0) {
+		// "Pineapple Fried Rice" / "-Chicken  11.45": the add-on line carries the price.
+		price = round2(pending.addOns / pending.quantity);
+	} else if (price !== null) {
+		price = round2(price + pending.addOns / pending.quantity);
+	}
 	if (price === null || price <= 0) return null;
-	price = round2(price + pending.addOns / pending.quantity);
 	return {
 		id: generateId(),
 		name: pending.name,
@@ -51,6 +58,15 @@ function buildItem(pending: PendingItem): ReceiptItem | null {
  * attaches to the item next to it, and a summary label takes its value from
  * the next line.
  */
+/** A bare name followed by one of these starts a new item instead of being an option. */
+function nextCarriesPrice(next: ReceiptLine | undefined): boolean {
+	return (
+		next?.kind === 'price' ||
+		next?.kind === 'qtyUnit' ||
+		(next?.kind === 'modifier' && next.price !== null)
+	);
+}
+
 export function parseReceiptText(text: string): ParseResult {
 	// Blank lines never separate a label from its value or a name from its price.
 	const lines = text
@@ -61,6 +77,12 @@ export function parseReceiptText(text: string): ParseResult {
 	const summary: Record<SummaryField, number | null> = { tax: null, subtotal: null, total: null, tip: null };
 	let pending: PendingItem | null = null;
 	let qtyStash: number | null = null;
+	// Receipts that print a quantity on each item ("1 Pad Thai  18.95") put
+	// options on the bare lines under it ("Chicken", "Medium").
+	const qtyStyle =
+		lines.filter((l) => (l.kind === 'item' || l.kind === 'name') && l.hasQty).length +
+			lines.filter((l) => l.kind === 'qtyPrice').length >=
+		3;
 
 	function flushPending() {
 		if (pending !== null) {
@@ -73,6 +95,8 @@ export function parseReceiptText(text: string): ParseResult {
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
 		const next = lines[i + 1];
+		// Everything after the total is payment details, tip suggestions, ads.
+		if (summary.total !== null && line.kind !== 'summary') continue;
 		switch (line.kind) {
 			case 'summary': {
 				// Only the first occurrence of each field counts.
@@ -89,6 +113,13 @@ export function parseReceiptText(text: string): ParseResult {
 				break;
 			}
 			case 'item':
+				if (pending !== null && pending.hasQty && !line.hasQty && pending.lineTotal === null && pending.unitPrice === null) {
+					// "1 Vegetable & Pork Spicy" / "Wontons  $15.00": a wrapped name.
+					pending.name += ' ' + line.name;
+					pending.lineTotal = line.price * line.quantity;
+					flushPending();
+					break;
+				}
 				flushPending();
 				items.push({
 					id: generateId(),
@@ -97,6 +128,20 @@ export function parseReceiptText(text: string): ParseResult {
 					quantity: line.quantity,
 					assignedTo: []
 				});
+				break;
+			case 'qtyPrice':
+				// "1 M5   16.95" then the name on the next line.
+				flushPending();
+				if (next?.kind === 'name') {
+					items.push({
+						id: generateId(),
+						name: next.name,
+						price: round2(line.price / line.quantity),
+						quantity: line.quantity,
+						assignedTo: []
+					});
+					i++;
+				}
 				break;
 			case 'qtyUnit':
 				// "3 @ 0.25" under a name.
@@ -125,7 +170,25 @@ export function parseReceiptText(text: string): ParseResult {
 				}
 				break;
 			case 'name':
-				if (qtyStash !== null || pending === null) {
+				if (
+					qtyStyle &&
+					pending === null &&
+					qtyStash === null &&
+					!line.hasQty &&
+					items.length > 0 &&
+					!nextCarriesPrice(next)
+				) {
+					// "Chicken" / "Medium" under "1 Pad Thai  18.95": an option of that item.
+					items[items.length - 1].name += ' ' + line.name;
+					break;
+				}
+				if (
+					qtyStash !== null ||
+					pending === null ||
+					line.hasQty ||
+					pending.unitPrice !== null ||
+					pending.lineTotal !== null
+				) {
 					// A stashed quantity signals a new item, or there's no pending one.
 					flushPending();
 					pending = {
@@ -133,7 +196,8 @@ export function parseReceiptText(text: string): ParseResult {
 						quantity: qtyStash ?? line.quantity,
 						unitPrice: null,
 						lineTotal: null,
-						addOns: 0
+						addOns: 0,
+						hasQty: line.hasQty || qtyStash !== null
 					};
 					qtyStash = null;
 				} else {

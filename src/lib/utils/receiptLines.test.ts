@@ -30,18 +30,21 @@ describe('classifyLine', () => {
 			kind: 'item',
 			name: '6 pc chicken nuggets',
 			quantity: 1,
-			price: 7.99
+			price: 7.99,
+			hasQty: false
 		});
 		expect(classifyLine('6 chicken nuggets  7.98')).toEqual({
 			kind: 'item',
 			name: 'chicken nuggets',
 			quantity: 6,
-			price: 1.33
+			price: 1.33,
+			hasQty: true
 		});
 		expect(classifyLine('6 pc chicken nuggets')).toEqual({
 			kind: 'name',
 			name: '6 pc chicken nuggets',
-			quantity: 1
+			quantity: 1,
+			hasQty: false
 		});
 	});
 

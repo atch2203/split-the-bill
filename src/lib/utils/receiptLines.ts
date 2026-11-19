@@ -1,3 +1,4 @@
+import { levenshtein } from '../ocr/text';
 // Line-level receipt analysis: price repair, summary/skip patterns, and
 // classifying one line into a kind that parseReceiptText combines.
 
@@ -40,8 +41,10 @@ function normalizePrice(priceStr: string): number | null {
 		return isNaN(value) ? null : value;
 	}
 
-	// If it's 1-2 digits, treat as whole dollars
+	// 1-2 digits are whole dollars only with a "$"; a bare "44" is usually a
+	// register/table number, not a price.
 	if (/^\d{1,2}$/.test(cleaned)) {
+		if (!priceStr.includes('$')) return null;
 		const value = parseFloat(cleaned);
 		return isNaN(value) ? null : value;
 	}
@@ -68,6 +71,7 @@ const TAX_LABEL_PATTERNS = [/^(sales\s*)?tax\s*:?\s*$/i, /^hst\s*:?\s*$/i, /^gst
 
 // Patterns that indicate SUBTOTAL line
 const SUBTOTAL_PATTERNS = [
+	/^sub\s*-?\s*total\s*\(\d+\)\s*:?\s*\$?([\d,.\s]+)/i, // "Subtotal (7)  60.83" (item count)
 	/^sub\s*-?\s*total\s*:?\s*\$?([\d,.\s]+)/i,
 	/^subtotal\s*:?\s*\$?([\d,.\s]+)/i,
 	/^sub\s+\$?([\d,.\s]+)/i
@@ -80,7 +84,8 @@ const TOTAL_PATTERNS = [
 	/^total\s*:?\s*\$?([\d,.\s]+)/i,
 	/^grand\s*total\s*:?\s*\$?([\d,.\s]+)/i,
 	/^amount\s*due\s*:?\s*\$?([\d,.\s]+)/i,
-	/^balance\s*due\s*:?\s*\$?([\d,.\s]+)/i
+	/^balance\s*due\s*:?\s*\$?([\d,.\s]+)/i,
+	/^balance\s*:?\s*\$?([\d,.\s]+)/i
 ];
 
 const TOTAL_LABEL_PATTERNS = [/^(grand\s*)?total\s*:?\s*$/i, /^amount\s*due\s*:?\s*$/i, /^balance\s*due\s*:?\s*$/i];
@@ -88,7 +93,9 @@ const TOTAL_LABEL_PATTERNS = [/^(grand\s*)?total\s*:?\s*$/i, /^amount\s*due\s*:?
 // Patterns that indicate TIP line
 const TIP_PATTERNS = [
 	/^tip\s*:?\s*\$?([\d,.\s]+)/i,
-	/^gratuity\s*:?\s*\$?([\d,.\s]+)/i
+	/^gratuity\s*:?\s*\$?([\d,.\s]+)/i,
+	// Service charges added in place of a tip: "Charge(20%): $30.32", "Large Party (18.00%) $14.90".
+	/^(?:service\s*charge|charge|large\s*party|auto\s*grat\w*)\b.*?\s\$?(\d+[.,]\d{2})$/i
 ];
 
 const TIP_LABEL_PATTERNS = [/^tip\s*:?\s*$/i, /^gratuity\s*:?\s*$/i];
@@ -315,7 +322,10 @@ function parseLine(line: string): ParsedLine | null {
 // Check if a line is just a price (for multi-line item detection)
 function isJustPrice(line: string): number | null {
 	const trimmed = line.trim();
-	// Match lines that are only a price: $12.99, 12.99, 1299, etc.
+	// A price alone on its line must show cents or a "$": a bare "1403" is
+	// more likely a suite number or other header noise than a price.
+	if (!/[.,]\d{2}\s*$/.test(trimmed) && !trimmed.startsWith('$')) return null;
+	// Match lines that are only a price: $12.99, 12.99, $12, etc.
 	const priceOnlyMatch = trimmed.match(/^[$]?([\d,.\s]+)$/);
 	if (priceOnlyMatch) {
 		const price = normalizePrice(priceOnlyMatch[1]);
@@ -365,7 +375,10 @@ function isQtyOnlyLine(line: string): number | null {
 // Matches lines of the form "N @ $X.XX" or "Nx $X.XX" (quantity + unit price, no name)
 function isQtyUnitLine(line: string): { quantity: number; unitPrice: number } | null {
 	const trimmed = line.trim();
-	const match = trimmed.match(/^(\d{1,3})\s*[@x]\s*\$?([\d,.\s]+)\s*$/i);
+	// "3 @ 0.25", or with the line total after it: "2 @ $2.50   $5.00".
+	const match =
+		trimmed.match(/^(\d{1,3})\s*[@x]\s*\$?(\d+[.,]\d{2})\s+\$?\d+[.,]\d{2}\s*$/i) ??
+		trimmed.match(/^(\d{1,3})\s*[@x]\s*\$?([\d,.\s]+)\s*$/i);
 	if (!match) return null;
 	const quantity = parseInt(match[1], 10);
 	const unitPrice = normalizePrice(match[2]);
@@ -390,8 +403,33 @@ export function stripItemCodes(line: string): string {
 	return parts.join('').trim();
 }
 
-/** A 1–2 letter tax/department flag after the price: "3.48 N", "7.99 T", "12.49 TX". */
-const TRAILING_FLAG = /(\d[.,]\d{2})\s+[A-Z]{1,2}$/;
+/** A 1–2 letter tax/department flag after the price ("3.48 N", "12.49 TX"), or one digit (an "S" misread as "5"). */
+const TRAILING_FLAG = /(\d[.,]\d{2})\s+(?:[A-Z]{1,2}|\d)$/;
+/** Two prices at the end ("Price  You Pay", "unit  total"): the last one is what's paid. */
+const TWO_PRICES = /(\$?\d+[.,]\d{2})\s+(\$?\d+[.,]\d{2})$/;
+
+/** Drops a trailing flag, then keeps only the last of two trailing prices. */
+export function cleanPriceTail(line: string): string {
+	const flagless = line.replace(TRAILING_FLAG, '$1');
+	// "2 @ $2.50  $5.00" keeps both: the unit price is the one that matters there.
+	return /\d\s*@\s*\$?\d/.test(flagless) ? flagless : flagless.replace(TWO_PRICES, '  $2');
+}
+
+/** Dates, times, percentages and asterisks before a summary label. */
+const SUMMARY_PREFIX = /^(?:[\d/:.,%*()#-]+(?:[ap]m?)?\s*)+(?=[a-z])/i;
+
+/** A menu number after the optional quantity: "M5", "C13.", "H21a.", "A19.", "99." */
+const MENU_CODE = /^(\d{1,2}\s+)?(?:[A-Z]{1,2}\d{1,3}[a-z]?\.?|\d{1,3}\.)(?=\s|[A-Za-z])\s*/;
+
+/** Removes a menu number ("2 99.BBQ Pork" → "2 BBQ Pork", "M5 Tofu" → "Tofu"). */
+export function stripMenuCode(line: string): string {
+	return line.replace(MENU_CODE, '$1').trim();
+}
+
+/** The line starts with a quantity (not a size like "6 pc"). */
+const QTY_PREFIX = new RegExp(String.raw`^\d{1,2}\s*[x@]?\s+(?!${SIZE_UNIT})\D`, 'i');
+/** Quantity, at most a 2-character scrap, then a price: "1 M5   16.95" after code removal. */
+const QTY_PRICE = /^(\d{1,2})\s+(?:(?![@x]\s)\S{1,2}\s+)?\$?(\d+[.,]\d{2})$/i;
 
 /** Add-on prefixes: "+ Oat Milk", "Add Bacon", "w/ Cream Cheese"; "- No Onion" (free). */
 const MODIFIER = /^(?:(\+|add\b|w\/)|(-)(?=\s*[a-z]))\s*(.+)$/i;
@@ -414,8 +452,10 @@ export type SummaryField = 'tax' | 'subtotal' | 'total' | 'tip';
 export type ReceiptLine =
 	/** Tax/subtotal/total/tip; `value` null = label only (value may be on the next line). */
 	| { kind: 'summary'; field: SummaryField; value: number | null }
-	/** A complete item; `price` is the unit price. */
-	| { kind: 'item'; name: string; quantity: number; price: number }
+	/** A complete item; `price` is the unit price. `hasQty`: the line starts with a quantity. */
+	| { kind: 'item'; name: string; quantity: number; price: number; hasQty: boolean }
+	/** "1 M5   16.95": quantity and line total, the name is on the next line. */
+	| { kind: 'qtyPrice'; quantity: number; price: number }
 	/** "3 @ 0.25": quantity and unit price for the item above. */
 	| { kind: 'qtyUnit'; quantity: number; unitPrice: number }
 	/** A bare quantity ("2"). */
@@ -423,7 +463,7 @@ export type ReceiptLine =
 	/** A price alone (an item code before it is allowed). */
 	| { kind: 'price'; price: number }
 	/** An item name (or part of one) without a price. */
-	| { kind: 'name'; name: string; quantity: number }
+	| { kind: 'name'; name: string; quantity: number; hasQty: boolean }
 	/** "+ Oat Milk 0.75", "- No Onion": belongs to the item above. `price` null = free. */
 	| { kind: 'modifier'; sign: '+' | '-'; name: string; price: number | null }
 	/** Blank, header/footer noise, or unrecognized. */
@@ -436,12 +476,41 @@ const SUMMARY: { field: SummaryField; patterns: RegExp[]; labels: RegExp[]; max?
 	{ field: 'tip', patterns: TIP_PATTERNS, labels: TIP_LABEL_PATTERNS, max: 1000 }
 ];
 
+/**
+ * "1Thunderbird" (glued) and "I Pad Thai" / "l Gumbo" (1 misread) at the start
+ * of a line become "1 Thunderbird", "1 Pad Thai".
+ */
+export function fixQtyMisreads(line: string): string {
+	return line.replace(/^(\d)(?=[A-Z][a-z])/, '$1 ').replace(/^[Il|]\s+(?=[A-Z])/, '1 ');
+}
+
+const SUMMARY_WORDS: { word: string; field: SummaryField; maxDist: number }[] = [
+	{ word: 'subtotal', field: 'subtotal', maxDist: 2 },
+	{ word: 'total', field: 'total', maxDist: 1 }
+];
+
+/** "SubTural:  69.55", "TOTAI  12.00": a label OCR garbled, followed by a price. */
+function fuzzySummary(label: string): ReceiptLine | null {
+	const m = label.match(/^([a-z ]{4,12}):?\s+\$?(\d+[.,]\d{2})$/i);
+	if (!m) return null;
+	const word = m[1].replace(/\s/g, '').toLowerCase();
+	for (const s of SUMMARY_WORDS) {
+		if (levenshtein(word, s.word) <= s.maxDist) {
+			const value = normalizePrice(m[2]);
+			return value !== null && value > 0 ? { kind: 'summary', field: s.field, value } : null;
+		}
+	}
+	return null;
+}
+
 export function classifyLine(raw: string): ReceiptLine {
 	const trimmed = raw.trim();
 	if (!trimmed) return { kind: 'other' };
 
+	// "07/04 21:17 TOTAL: 463.45", "18% TIP 70.70", "**** BALANCE 49.23"
+	const label = trimmed.replace(SUMMARY_PREFIX, '');
 	for (const { field, patterns, labels, max } of SUMMARY) {
-		const m = patterns.map((p) => trimmed.match(p)).find((x) => x);
+		const m = patterns.map((p) => label.match(p)).find((x) => x);
 		if (m) {
 			const value = normalizePrice(m[1]);
 			if (value !== null && value > 0 && (max === undefined || value < max)) {
@@ -449,15 +518,25 @@ export function classifyLine(raw: string): ReceiptLine {
 			}
 			continue;
 		}
-		if (labels.some((p) => p.test(trimmed))) return { kind: 'summary', field, value: null };
+		if (labels.some((p) => p.test(label))) return { kind: 'summary', field, value: null };
 	}
 
-	const line = stripItemCodes(trimmed.replace(TRAILING_FLAG, '$1'));
+	const fuzzy = fuzzySummary(label);
+	if (fuzzy) return fuzzy;
+
+	const line = fixQtyMisreads(stripMenuCode(stripItemCodes(cleanPriceTail(trimmed))));
 	if (!line) return { kind: 'other' };
+	const hasQty = QTY_PREFIX.test(line);
+	const qp = line.match(QTY_PRICE);
+	if (qp) {
+		const total = normalizePrice(qp[2]);
+		const quantity = parseInt(qp[1], 10);
+		if (total !== null && total > 0 && quantity > 0) return { kind: 'qtyPrice', quantity, price: total };
+	}
 	const modifier = parseModifier(line);
 	if (modifier) return modifier;
 	const item = parseLine(line);
-	if (item) return { kind: 'item', name: item.name, quantity: item.quantity, price: item.price };
+	if (item) return { kind: 'item', name: item.name, quantity: item.quantity, price: item.price, hasQty };
 	const qtyUnit = isQtyUnitLine(line);
 	if (qtyUnit) return { kind: 'qtyUnit', ...qtyUnit };
 	const qty = isQtyOnlyLine(line);
@@ -465,6 +544,6 @@ export function classifyLine(raw: string): ReceiptLine {
 	const price = isJustPrice(line);
 	if (price !== null) return { kind: 'price', price };
 	const name = isNameWithoutPrice(line);
-	if (name) return { kind: 'name', ...name };
+	if (name) return { kind: 'name', ...name, hasQty };
 	return { kind: 'other' };
 }
