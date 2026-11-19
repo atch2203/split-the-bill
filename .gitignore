@@ -25,3 +25,6 @@ vite.config.ts.timestamp-*
 # Local eval receipts
 /test-receipts
 /static/ort
+
+# Private receipt photos (PII) - never commit
+/receipts
